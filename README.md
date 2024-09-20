@@ -1,2 +1,3 @@
 # newc
- a simple language based on C
+
+A simple language based on C to explore LLVM.
