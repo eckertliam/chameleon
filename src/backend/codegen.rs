@@ -1,6 +1,6 @@
 use core::panic;
 
-use inkwell::{types::{AnyType, AnyTypeEnum, BasicType}, values::{AnyValue, AnyValueEnum, BasicValue}};
+use inkwell::{types::{AnyType, AnyTypeEnum, BasicType, BasicTypeEnum}, values::{AnyValue, AnyValueEnum, BasicValue, BasicValueEnum}};
 
 use crate::frontend::{AstExpr, AstStatement, AstType, BinOpKind};
 
@@ -11,6 +11,42 @@ type IRResult<T> = Result<T, CodegenError>;
 pub type IRValueResult<'ir> = IRResult<AnyValueEnum<'ir>>;
 
 pub type IRTypeResult<'ir> = IRResult<AnyTypeEnum<'ir>>;
+
+/// helper to convert a BasicValueEnum to an AnyValueEnum
+fn basic_value_to_any<'ir>(basic: BasicValueEnum<'ir>) -> AnyValueEnum<'ir> {
+    match basic {
+        BasicValueEnum::IntValue(int_val) => AnyValueEnum::IntValue(int_val),
+        BasicValueEnum::FloatValue(float_val) => AnyValueEnum::FloatValue(float_val),
+        _ => panic!("Error: An error occured while converting a BasicValueEnum to an AnyValueEnum")
+    }
+}
+
+/// helper to convert an AnyValueEnum to a BasicValueEnum
+fn any_value_to_basic<'ir>(any: AnyValueEnum<'ir>) -> BasicValueEnum<'ir> {
+    match any {
+        AnyValueEnum::IntValue(int_val) => BasicValueEnum::IntValue(int_val),
+        AnyValueEnum::FloatValue(float_val) => BasicValueEnum::FloatValue(float_val),
+        _ => panic!("Error: An error occured while converting an AnyValueEnum to a BasicValueEnum")
+    }
+}
+
+/// helper to convert an AnyTypeEnum to a BasicTypeEnum
+fn any_type_to_basic<'ir>(any: AnyTypeEnum<'ir>) -> BasicTypeEnum<'ir> {
+    match any {
+        AnyTypeEnum::IntType(int_ty) => int_ty.as_basic_type_enum(),
+        AnyTypeEnum::FloatType(float_ty) => float_ty.as_basic_type_enum(),
+        _ => panic!("Error: An error occured while converting an AnyTypeEnum to a BasicTypeEnum")
+    }
+}
+
+/// helper to convert a BasicTypeEnum to an AnyTypeEnum
+fn basic_type_to_any<'ir>(basic: BasicTypeEnum<'ir>) -> AnyTypeEnum<'ir> {
+    match basic {
+        BasicTypeEnum::IntType(int_ty) => int_ty.as_any_type_enum(),
+        BasicTypeEnum::FloatType(float_ty) => float_ty.as_any_type_enum(),
+        _ => panic!("Error: An error occured while converting a BasicType to an AnyType")
+    }
+}
 
 pub trait Codegen<'ctx, 'ir> 
 where 'ctx: 'ir
@@ -147,20 +183,31 @@ where 'ctx: 'ir
     fn codegen(&self, codegen_context: &CodegenContext<'ctx>) -> IRValueResult<'ir> {
         match self {
             AstStatement::Expr(expr) => expr.codegen(codegen_context),
-            AstStatement::ConstDef { name, ty, value, loc } => {
-                let value = match value.codegen(codegen_context)? {
-                    AnyValueEnum::IntValue(int_val) => int_val.as_basic_value_enum(),
-                    AnyValueEnum::FloatValue(float_val) => float_val.as_basic_value_enum(),
-                    _ => panic!("Error: An error occured while getting the value of the constant definition at location {:?}", loc)
-                };
-                let ty = match ty.codegen(codegen_context)? {
-                    AnyTypeEnum::IntType(int_ty) => int_ty.as_basic_type_enum(),
-                    AnyTypeEnum::FloatType(float_ty) => float_ty.as_basic_type_enum(),
-                    _ => panic!("Error: An error occured while getting the type of the constant definition at location {:?}", loc)
-                };
+            AstStatement::ConstDef { name, ty, value, .. } => {
+                // generate the IR value then convert it from an AnyValueEnum to a BasicValueEnum
+                let value = any_value_to_basic(value.codegen(codegen_context)?);
+                // get the type of the constant definition and convert it from an AnyTypeEnum to a BasicTypeEnum
+                let ty = any_type_to_basic(ty.codegen(codegen_context)?);
+                // allocate memory for the constant definition
                 let value_ptr = codegen_context.builder.build_alloca(ty, name.as_str()).unwrap();
+                // create an instruction to store the value in the allocated memory
                 let store_instr = codegen_context.builder.build_store(value_ptr, value).unwrap();
+                // store the symbol value in the symbol table
                 let symbol_value = SymbolValue::constant(value_ptr, ty);
+                codegen_context.symbol_table.borrow_mut().insert(name.clone(), symbol_value);
+                Ok(store_instr.as_any_value_enum())
+            }
+            AstStatement::LetDef { name, ty, value, .. } => {
+                // generate the IR value then convert it from an AnyValueEnum to a BasicValueEnum
+                let value = any_value_to_basic(value.codegen(codegen_context)?);
+                // get the type of the constant definition and convert it from an AnyTypeEnum to a BasicTypeEnum
+                let ty = any_type_to_basic(ty.codegen(codegen_context)?);
+                // allocate memory for the constant definition
+                let value_ptr = codegen_context.builder.build_alloca(ty, name.as_str()).unwrap();
+                // create an instruction to store the value in the allocated memory
+                let store_instr = codegen_context.builder.build_store(value_ptr, value).unwrap();
+                // store the symbol value in the symbol table
+                let symbol_value = SymbolValue::mutable(value_ptr, ty);
                 codegen_context.symbol_table.borrow_mut().insert(name.clone(), symbol_value);
                 Ok(store_instr.as_any_value_enum())
             }
