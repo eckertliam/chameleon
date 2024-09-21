@@ -4,12 +4,13 @@ use inkwell::values::PointerValue;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::Module;
+use inkwell::types::BasicTypeEnum;
 
 pub struct CodegenContext<'ctx> {
-    builder: Builder<'ctx>,
-    context: &'ctx Context,
-    module: Module<'ctx>,
-    symbol_table: HashMap<String, PointerValue<'ctx>>
+    pub builder: Builder<'ctx>,
+    pub context: &'ctx Context,
+    pub module: Module<'ctx>,
+    pub symbol_table: HashMap<String, (PointerValue<'ctx>, BasicTypeEnum<'ctx>)>
 }
 
 impl<'ctx> CodegenContext<'ctx> {

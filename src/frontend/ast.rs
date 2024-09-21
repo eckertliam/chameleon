@@ -54,11 +54,6 @@ pub enum AstExpr {
         stmts: Vec<AstExpr>,
         loc: Loc,
     },
-    FnCall {
-        name: String,
-        args: Vec<AstExpr>,
-        loc: Loc,
-    },
 }
 
 #[derive(Debug, Clone, Copy)]
