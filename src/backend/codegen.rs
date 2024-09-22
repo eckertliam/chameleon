@@ -1,4 +1,8 @@
-use inkwell::builder::Builder;
+use inkwell::{
+    builder::Builder, 
+    types::{AnyType, AnyTypeEnum, BasicType, BasicTypeEnum, FloatType, IntType}, 
+    values::{AnyValue, AnyValueEnum, BasicValue, BasicValueEnum, FloatValue, IntValue},
+};
 use crate::frontend::{AstExpr, AstStatement, AstType, BinOpKind};
 
 use super::{codegen_ctx::{CodegenContext, SymbolValue}, codegen_err::CodegenError};
@@ -69,10 +73,9 @@ where 'ctx: 'ir
                 match codegen_context.symbol_table.borrow().get(name) {
                     Some(symbol_value) => {
                         let ptr = symbol_value.ptr_val;
-                        // we'll return a load instruction
-                        let load_instr = codegen_context
-                            .builder.build_load(ptr, name)
-                            .expect("an error has while building a load instrucction");
+                        let ty = symbol_value.pointee_ty;
+                        let load_instr = codegen_context.builder.build_load(ty, ptr, name)
+                            .expect("Error: An error occured while building a load instruction");
                         Ok(load_instr.as_any_value_enum())
                     }
                     None => Err(CodegenError::UndefinedSymbol(name.clone(), *loc))
@@ -207,6 +210,25 @@ where 'ctx: 'ir
                 let symbol_value = SymbolValue::mutable(value_ptr, ty);
                 codegen_context.symbol_table.borrow_mut().insert(name.clone(), symbol_value);
                 Ok(store_instr.as_any_value_enum())
+            }
+            AstStatement::Return { expr, loc } => {
+                let return_expr = if let Some(e) = expr {
+                    let ir_expr = any_value_to_basic(e.codegen(codegen_context)?);
+                    Some(ir_expr)
+                } else {
+                    None
+                };
+                if let Some(basic_val_enum) = return_expr {
+                    let return_instr = codegen_context.builder.build_return(Some(&basic_val_enum));
+                    if let Ok(instr_val) = return_instr {
+                        return Ok(instr_val.as_any_value_enum())
+                    }
+                }
+                if let Ok(instr_val) = codegen_context.builder.build_return(None) {
+                    return Ok(instr_val.as_any_value_enum())
+                } else {
+                    panic!("Error: An error occured while building return instruction at location {:?}", loc)
+                }
             }
             _ => unimplemented!("codegen for {:?} has not been implemented", self)
         }
