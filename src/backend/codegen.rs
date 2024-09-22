@@ -1,7 +1,4 @@
-use core::panic;
-
-use inkwell::{types::{AnyType, AnyTypeEnum, BasicType, BasicTypeEnum}, values::{AnyValue, AnyValueEnum, BasicValue, BasicValueEnum}};
-
+use inkwell::builder::Builder;
 use crate::frontend::{AstExpr, AstStatement, AstType, BinOpKind};
 
 use super::{codegen_ctx::{CodegenContext, SymbolValue}, codegen_err::CodegenError};
@@ -71,11 +68,11 @@ where 'ctx: 'ir
                 // we have to see if the identifier is defined in the symbol table
                 match codegen_context.symbol_table.borrow().get(name) {
                     Some(symbol_value) => {
+                        let ptr = symbol_value.ptr_val;
                         // we'll return a load instruction
                         let load_instr = codegen_context
-                            .builder
-                            .build_load(symbol_value.pointee_ty, symbol_value.ptr_val, "load_val")
-                            .expect("Error: An error occured while building a load instruction");
+                            .builder.build_load(ptr, name)
+                            .expect("an error has while building a load instrucction");
                         Ok(load_instr.as_any_value_enum())
                     }
                     None => Err(CodegenError::UndefinedSymbol(name.clone(), *loc))
