@@ -1,3 +1,11 @@
+use std::collections::HashMap;
+
+pub struct Program {
+    pub fn_defs: Vec<FnDef>,
+    pub use_types: HashMap<String, AstType>,
+}
+
+
 #[derive(Debug, Clone, Copy)]
 pub struct Loc {
     pub start: usize,
@@ -89,13 +97,6 @@ pub enum AstStatement {
         loc: Loc,
     },
     Expr(AstExpr),
-    FnDef {
-        name: String,
-        params: Vec<(String, AstType)>,
-        ret_ty: AstType,
-        body: AstExpr,
-        loc: Loc,
-    },
     LetDef {
         name: String,
         ty: AstType,
@@ -116,7 +117,7 @@ pub enum AstStatement {
     },
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum AstType {
     Float,
     Int,
@@ -125,4 +126,16 @@ pub enum AstType {
     String,
     UnsignedInt,
     Void,
+    Ptr(Box<AstType>),
+    Tuple(Vec<AstType>),
+    Array(Box<AstType>, usize),
+    Sum(Vec<(String, Option<AstType>)>),
+    Product(Vec<AstType>),
+}
+
+pub struct FnDef {
+    pub name: String,
+    pub params: Vec<(String, AstType)>,
+    pub ret_ty: AstType,
+    pub body: Vec<AstStatement>,
 }
