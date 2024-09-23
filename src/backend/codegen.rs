@@ -1,5 +1,3 @@
-use core::alloc;
-
 use inkwell::{
     builder::Builder, module::Linkage, types::{AnyType, AnyTypeEnum, BasicMetadataTypeEnum, BasicType, BasicTypeEnum, FloatType, IntType}, values::{AnyValue, AnyValueEnum, BasicValue, BasicValueEnum, FloatValue, IntValue}
 };
