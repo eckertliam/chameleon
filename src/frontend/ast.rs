@@ -5,11 +5,39 @@ pub struct Program {
     pub use_types: HashMap<String, AstType>,
 }
 
+impl Program {
+    pub fn new() -> Self {
+        Self {
+            fn_defs: Vec::new(),
+            use_types: HashMap::new(),
+        }
+    }
+
+    pub fn add_fn_def(&mut self, fn_def: FnDef) {
+        self.fn_defs.push(fn_def);
+    }
+
+    pub fn add_use_type(&mut self, name: String, ty: AstType) {
+        self.use_types.insert(name, ty);
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct Loc {
     pub start: usize,
     pub end: usize,
+}
+
+impl Loc {
+    pub const fn new(start: usize, end: usize) -> Self {
+        Self { start, end }
+    }
+}
+
+impl Default for Loc {
+    fn default() -> Self {
+        Self::new(0, 0)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -138,4 +166,15 @@ pub struct FnDef {
     pub params: Vec<(String, AstType)>,
     pub ret_ty: AstType,
     pub body: Vec<AstStatement>,
+}
+
+impl FnDef {
+    pub fn new(name: String, params: Vec<(String, AstType)>, ret_ty: AstType, body: Vec<AstStatement>) -> Self {
+        Self {
+            name,
+            params,
+            ret_ty,
+            body,
+        }
+    }
 }

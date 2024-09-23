@@ -1,7 +1,7 @@
 use inkwell::{
     builder::Builder, module::Linkage, types::{AnyType, AnyTypeEnum, BasicMetadataTypeEnum, BasicType, BasicTypeEnum, FloatType, IntType}, values::{AnyValue, AnyValueEnum, BasicValue, BasicValueEnum, FloatValue, IntValue}
 };
-use crate::frontend::{AstExpr, AstStatement, AstType, BinOpKind, FnDef};
+use crate::frontend::{AstExpr, AstStatement, AstType, BinOpKind, FnDef, Program};
 
 use super::{codegen_ctx::{CodegenContext, SymbolValue}, codegen_err::CodegenError};
 
@@ -225,7 +225,7 @@ where 'ctx: 'ir
     }
 }
 
-impl<'ctx, 'ir> FnDef
+impl<'ctx, 'ir> Codegen<'ctx, 'ir> for FnDef
 where 'ctx: 'ir
 {
     fn codegen(&self, codegen_context: &CodegenContext<'ctx>) -> IRValueResult<'ir> {
@@ -268,10 +268,21 @@ where 'ctx: 'ir
         for stmt in self.body.iter() {
             stmt.codegen(codegen_context)?;
         }
-        
+
         // pop the scope from the symbol table
         codegen_context.symbol_table.borrow_mut().pop_scope();
 
         Ok(fn_val.as_any_value_enum())
+    }
+}
+
+impl <'ctx, 'ir> Program
+where 'ctx: 'ir
+{
+    pub fn codegen(&self, codegen_context: &CodegenContext<'ctx>) -> IRResult<()> {
+        for fn_def in self.fn_defs.iter() {
+            fn_def.codegen(codegen_context)?;
+        }
+        Ok(())
     }
 }
