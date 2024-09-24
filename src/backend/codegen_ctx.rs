@@ -2,17 +2,20 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::Path;
 
+use inkwell::targets::{CodeModel, InitializationConfig, RelocMode, Target, TargetMachine, TargetMachineOptions, TargetTriple};
 use inkwell::values::PointerValue;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::Module;
 use inkwell::types::BasicTypeEnum;
+use inkwell::OptimizationLevel;
 
 pub struct CodegenContext<'ctx> {
     pub builder: Builder<'ctx>,
     pub context: &'ctx Context,
     pub module: Module<'ctx>,
     pub symbol_table: RefCell<SymbolTable<'ctx>>,
+    pub target_machine: TargetMachine,
 }
 
 pub struct SymbolTable<'ctx> {
@@ -81,11 +84,22 @@ impl<'ctx> CodegenContext<'ctx> {
         let module = context.create_module("main");
         let builder = context.create_builder();
 
+        Target::initialize_webassembly(&InitializationConfig::default());
+        
+        let triple = TargetTriple::create("wasm32-unknown-unknown-wasm");
+        let target = Target::from_triple(&triple).unwrap();
+        let opt = OptimizationLevel::Default;
+        let reloc = RelocMode::Default;
+        let model = CodeModel::Default;
+        let target_machine = target.create_target_machine(&triple, "generic", "", opt, reloc, model).unwrap();
+
+
         Self {
             builder,
             context,
             module,
             symbol_table: RefCell::new(SymbolTable::new()),
+            target_machine,
         }
     }
 
@@ -97,5 +111,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let path = Path::new(file_name);
         self.module.write_bitcode_to_path(path);
     }
+
+
 }
 
