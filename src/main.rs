@@ -16,4 +16,5 @@ fn main() {
     program.add_fn_def(main_fn);
     program.codegen(&codegen_ctx).unwrap();
     println!("{}", codegen_ctx.ir_to_string());
+    codegen_ctx.emit_bitcode("main.bc");
 }

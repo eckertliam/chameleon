@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::path::Path;
 
 use inkwell::values::PointerValue;
 use inkwell::builder::Builder;
@@ -90,6 +91,11 @@ impl<'ctx> CodegenContext<'ctx> {
 
     pub fn ir_to_string(&self) -> String {
         self.module.print_to_string().to_string()
+    }
+
+    pub fn emit_bitcode(&self, file_name: &str) {
+        let path = Path::new(file_name);
+        self.module.write_bitcode_to_path(path);
     }
 }
 
