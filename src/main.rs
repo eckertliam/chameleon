@@ -17,4 +17,5 @@ fn main() {
     program.codegen(&codegen_ctx).unwrap();
     println!("{}", codegen_ctx.ir_to_string());
     codegen_ctx.emit_bitcode("main.bc");
+    codegen_ctx.emit_obj("main.o");
 }

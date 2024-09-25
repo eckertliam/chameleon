@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::Path;
 
-use inkwell::targets::{CodeModel, InitializationConfig, RelocMode, Target, TargetMachine, TargetMachineOptions, TargetTriple};
+use inkwell::targets::{CodeModel, InitializationConfig, RelocMode, Target, TargetMachine, TargetTriple};
 use inkwell::values::PointerValue;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
@@ -85,8 +85,8 @@ impl<'ctx> CodegenContext<'ctx> {
         let builder = context.create_builder();
 
         Target::initialize_webassembly(&InitializationConfig::default());
-        
-        let triple = TargetTriple::create("wasm32-unknown-unknown-wasm");
+
+        let triple = TargetMachine::get_default_triple();
         let target = Target::from_triple(&triple).unwrap();
         let opt = OptimizationLevel::Default;
         let reloc = RelocMode::Default;
@@ -112,6 +112,9 @@ impl<'ctx> CodegenContext<'ctx> {
         self.module.write_bitcode_to_path(path);
     }
 
-
+    pub fn emit_obj(&self, file_name: &str) {
+        let path = Path::new(file_name);
+        self.target_machine.write_to_file(&self.module, inkwell::targets::FileType::Object, path).unwrap();
+    }
 }
 
