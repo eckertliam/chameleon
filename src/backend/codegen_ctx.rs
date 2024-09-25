@@ -84,7 +84,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let module = context.create_module("main");
         let builder = context.create_builder();
 
-        Target::initialize_webassembly(&InitializationConfig::default());
+        Target::initialize_aarch64(&InitializationConfig::default());
 
         let triple = TargetMachine::get_default_triple();
         let target = Target::from_triple(&triple).unwrap();
