@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::Path;
 
-use inkwell::targets::{CodeModel, InitializationConfig, RelocMode, Target, TargetMachine, TargetTriple};
+use inkwell::targets::{CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine, TargetTriple};
 use inkwell::values::PointerValue;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
@@ -84,8 +84,7 @@ impl<'ctx> CodegenContext<'ctx> {
         let module = context.create_module("main");
         let builder = context.create_builder();
 
-        Target::initialize_aarch64(&InitializationConfig::default());
-
+        Target::initialize_native(&InitializationConfig::default()).unwrap();
         let triple = TargetMachine::get_default_triple();
         let target = Target::from_triple(&triple).unwrap();
         let opt = OptimizationLevel::Default;
@@ -112,9 +111,14 @@ impl<'ctx> CodegenContext<'ctx> {
         self.module.write_bitcode_to_path(path);
     }
 
+    pub fn emit_asm(&self, file_name: &str) {
+        let path = Path::new(file_name);
+        self.target_machine.write_to_file(&self.module, FileType::Assembly, path).unwrap();
+    }
+
     pub fn emit_obj(&self, file_name: &str) {
         let path = Path::new(file_name);
-        self.target_machine.write_to_file(&self.module, inkwell::targets::FileType::Object, path).unwrap();
+        self.target_machine.write_to_file(&self.module, FileType::Object, path).unwrap();
     }
 }
 
