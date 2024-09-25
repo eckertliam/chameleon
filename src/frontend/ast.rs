@@ -2,14 +2,15 @@ use std::collections::HashMap;
 
 pub struct Program {
     pub fn_defs: Vec<FnDef>,
-    pub use_types: HashMap<String, AstType>,
+    /// all UDTs
+    pub user_types: HashMap<String, AstType>,
 }
 
 impl Program {
     pub fn new() -> Self {
         Self {
             fn_defs: Vec::new(),
-            use_types: HashMap::new(),
+            user_types: HashMap::new(),
         }
     }
 
@@ -17,8 +18,8 @@ impl Program {
         self.fn_defs.push(fn_def);
     }
 
-    pub fn add_use_type(&mut self, name: String, ty: AstType) {
-        self.use_types.insert(name, ty);
+    pub fn add_user_type(&mut self, name: String, ty: AstType) {
+        self.user_types.insert(name, ty);
     }
 }
 
@@ -157,8 +158,8 @@ pub enum AstType {
     Ptr(Box<AstType>),
     Tuple(Vec<AstType>),
     Array(Box<AstType>, usize),
-    Sum(Vec<(String, Option<AstType>)>),
-    Product(Vec<AstType>),
+    Enum(Vec<(String, Option<AstType>)>),
+    Struct(Vec<AstType>),
 }
 
 pub struct FnDef {
