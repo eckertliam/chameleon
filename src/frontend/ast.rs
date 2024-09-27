@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use crate::frontend::Loc;
 
 pub struct Program {
     pub fn_defs: Vec<FnDef>,
@@ -20,24 +21,6 @@ impl Program {
 
     pub fn add_user_type(&mut self, name: String, ty: AstType) {
         self.user_types.insert(name, ty);
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct Loc {
-    pub start: usize,
-    pub end: usize,
-}
-
-impl Loc {
-    pub const fn new(start: usize, end: usize) -> Self {
-        Self { start, end }
-    }
-}
-
-impl Default for Loc {
-    fn default() -> Self {
-        Self::new(0, 0)
     }
 }
 
@@ -128,13 +111,13 @@ pub enum AstStatement {
     Expr(AstExpr),
     LetDef {
         name: String,
-        ty: AstType,
+        ty: Option<AstType>,
         value: AstExpr,
         loc: Loc,
     },
     ConstDef {
         name: String,
-        ty: AstType,
+        ty: Option<AstType>,
         value: AstExpr,
         loc: Loc,
     },

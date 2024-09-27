@@ -1,8 +1,9 @@
+use std::fmt::Display;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenKind {
     // literals
-    Int,
-    Float,
+    Number,
     String,
     Char,
     Ident,
@@ -40,6 +41,7 @@ pub enum TokenKind {
     Semicolon,
     Arrow,
     FatArrow,
+    Dot,
     // keywords
     Fn,
     Let,
@@ -58,10 +60,22 @@ pub enum TokenKind {
     UnexpectedChar,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Loc {
     pub line: usize,
     pub col: usize,
+}
+
+impl Display for Loc {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.line, self.col)
+    }
+}
+
+impl Default for Loc {
+    fn default() -> Self {
+        Self { line: 1, col: 1 }
+    }
 }
 
 #[derive(Clone)]
@@ -191,26 +205,7 @@ impl<'src> Tokenizer<'src> {
                 break;
             }
         }
-        let kind = if let Some('.') = self.peek_char() {
-            self.next_char();
-            let mut has_digits = false;
-            while let Some(c) = self.peek_char() {
-                if c.is_digit(10) {
-                    has_digits = true;
-                    self.next_char();
-                } else {
-                    break;
-                }
-            }
-            if !has_digits {
-                self.token(TokenKind::InvalidFloat);
-                return;
-            }
-            TokenKind::Float
-        } else {
-            TokenKind::Int
-        };
-        self.token(kind);        
+        self.token(TokenKind::Number);        
     }
 
     fn symbol_kind(&self) -> TokenKind {
@@ -328,6 +323,7 @@ impl<'src> Tokenizer<'src> {
                 '[' => self.next_simple(TokenKind::Lbracket),
                 ']' => self.next_simple(TokenKind::Rbracket),
                 ',' => self.next_simple(TokenKind::Comma),
+                '.' => self.next_simple(TokenKind::Dot),
                 ':' => self.next_simple(TokenKind::Colon),
                 ';' => self.next_simple(TokenKind::Semicolon),
                 'a'..='z' | 'A'..='Z' | '_' => self.read_symbol(),

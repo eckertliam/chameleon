@@ -152,7 +152,7 @@ where 'ctx: 'ir
                     Err(_) => panic!("Error: An error occured while converting value to BasicValueEnum")
                 };
                 // get the type of the constant definition and convert it from an AnyTypeEnum to a BasicTypeEnum
-                let ty = match BasicTypeEnum::try_from(ty.codegen(codegen_context)?) {
+                let ty = match BasicTypeEnum::try_from(ty.as_ref().unwrap().codegen(codegen_context)?) {
                     Ok(basic_ty) => basic_ty,
                     Err(_) => panic!("Error: An error occured while converting type to BasicTypeEnum")
                 };
@@ -172,7 +172,7 @@ where 'ctx: 'ir
                     Err(_) => panic!("Error: An error occured while converting value to BasicValueEnum")
                 };
                 // get the type of the constant definition and convert it from an AnyTypeEnum to a BasicTypeEnum
-                let ty = match BasicTypeEnum::try_from(ty.codegen(codegen_context)?) {
+                let ty = match BasicTypeEnum::try_from(ty.as_ref().unwrap().codegen(codegen_context)?) {
                     Ok(basic_ty) => basic_ty,
                     Err(_) => panic!("Error: An error occured while converting type to BasicTypeEnum")
                 };

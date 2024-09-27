@@ -102,7 +102,7 @@ impl<'ctx> CodegenContext<'ctx> {
         }
     }
 
-    pub fn ir_to_string(&self) -> String {
+    pub fn emit_ir(&self) -> String {
         self.module.print_to_string().to_string()
     }
 
