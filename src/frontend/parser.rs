@@ -52,6 +52,7 @@ impl<'src> Parser<'src> {
         match token.kind {
             TokenKind::Const => self.parse_var_decl(false),
             TokenKind::Let => self.parse_var_decl(true),
+            TokenKind::Return => self.parse_return(),
             _ => Err(format!("Unexpected token at {}", token.loc)),
         }
     }
@@ -115,5 +116,27 @@ impl<'src> Parser<'src> {
 
     fn parse_expr(&mut self) -> Result<AstExpr, String> {
         unimplemented!();
+    }
+
+    fn parse_return(&mut self) -> Result<AstStatement, String> {
+        let start_loc = self.advance().unwrap().loc;
+        match self.peek() {
+            Some(token) if token.kind == TokenKind::Semicolon => {
+                self.advance();
+                Ok(AstStatement::Return { expr: None, loc: start_loc })
+            }
+            Some(_) => {
+                match self.parse_expr() {
+                    Ok(expr) => {
+                        if let None = self.expect(TokenKind::Semicolon) {
+                            return Err(format!("Expected ';' at {}", self.peek().unwrap().loc));
+                        }
+                        Ok(AstStatement::Return { expr: Some(expr), loc: start_loc })
+                    }
+                    Err(e) => Err(e),
+                }
+            }
+            None => Err(format!("Unexpected EOF at {}", start_loc)),
+        }
     }
 }
