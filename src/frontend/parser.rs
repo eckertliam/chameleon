@@ -1,4 +1,4 @@
-use super::{tokenizer::{Token, TokenKind, Tokenizer}, AstExpr, AstStatement, AstType};
+use super::{tokenizer::{Token, TokenKind, Tokenizer}, AstExpr, AstStatement, AstType, BinOpKind};
 
 pub struct Parser<'src> {
     tokens: &'src Vec<Token<'src>>,
@@ -53,7 +53,7 @@ impl<'src> Parser<'src> {
             TokenKind::Const => self.parse_var_decl(false),
             TokenKind::Let => self.parse_var_decl(true),
             TokenKind::Return => self.parse_return(),
-            _ => Err(format!("Unexpected token at {}", token.loc)),
+            _ => Err(format!("Unexpected token at {} got {:?}", token.loc, token.lexeme)),
         }
     }
 
@@ -65,10 +65,10 @@ impl<'src> Parser<'src> {
             if let Some(lexeme) = token.lexeme {
                 lexeme
             } else {
-                return Err(format!("Expected identifier at {}", token.loc));
+                return Err(format!("Expected identifier at {} got {:?}", token.loc, token.lexeme));
             }
         } else {
-            return Err(format!("Expected identifier at {}", start_loc));
+            return Err(format!("Expected identifier at {} got {:?}", start_loc, self.peek().unwrap().lexeme));
         };
         // if there is a colon the type is explicitly declared
         let ty = if let Some(_) = self.expect(TokenKind::Colon) {
@@ -82,7 +82,7 @@ impl<'src> Parser<'src> {
         };
         // Expect an equal sign
         if let None = self.expect(TokenKind::Eq) {
-            return Err(format!("Expected '=' at {}", self.peek().unwrap().loc));
+            return Err(format!("Expected '=' at {} got {:?}", self.peek().unwrap().loc, self.peek().unwrap().lexeme));
         }
         // Parse the expression
         let expr = match self.parse_expr() {
@@ -91,7 +91,7 @@ impl<'src> Parser<'src> {
         };
         // Expect a semicolon
         if let None = self.expect(TokenKind::Semicolon) {
-            return Err(format!("Expected ';' at {}", self.peek().unwrap().loc));
+            return Err(format!("Expected ';' at {} got {:?}", self.peek().unwrap().loc, self.peek().unwrap().lexeme));
         }
         if mutable {
             Ok(AstStatement::LetDef { 
@@ -115,6 +115,85 @@ impl<'src> Parser<'src> {
     }
 
     fn parse_expr(&mut self) -> Result<AstExpr, String> {
+        unimplemented!();
+    }
+
+    fn parse_primary_expr(&mut self) -> Result<AstExpr, String> {
+        if let Some(token) = self.advance() {
+            let start_loc = token.loc;
+            match token.kind {
+                TokenKind::Ident => {
+                    if let Some(lexeme) = token.lexeme {
+                        Ok(AstExpr::Ident { name: lexeme.to_string(), loc: start_loc })
+                    } else {
+                        Err(format!("Expected identifier at {} got {:?}", start_loc, token.lexeme))
+                    }
+                }
+                TokenKind::Number => {
+                    if let Some(lexeme) = token.lexeme {
+                        if let Ok(value) = lexeme.parse::<i64>() {
+                            Ok(AstExpr::Int { value, loc: start_loc })
+                        } else if let Ok(value) = lexeme.parse::<f64>() {
+                            Ok(AstExpr::Float { value, loc: start_loc })
+                        } else {
+                            Err(format!("Invalid number literal at {} got {:?}", start_loc, token.lexeme))
+                        }
+                    } else {
+                        Err(format!("Expected number literal at {} got {:?}", start_loc, token.lexeme))
+                    }
+                }
+                TokenKind::Lparen => {
+                    match self.parse_expr() {
+                        Ok(expr) => {
+                            if let None = self.expect(TokenKind::Rparen) {
+                                return Err(format!("Expected ')' at {} got {:?}", self.peek().unwrap().loc, self.peek().unwrap().lexeme));
+                            }
+                            Ok(expr)
+                        }
+                        Err(e) => Err(e),
+                    }
+                }
+                TokenKind::String => {
+                    if let Some(lexeme) = token.lexeme {
+                        Ok(AstExpr::String { value: lexeme.to_string(), loc: start_loc })
+                    } else {
+                        Err(format!("Expected string literal at {} got {:?}", start_loc, token.lexeme))
+                    }
+                }
+                _ => Err(format!("Unexpected token at {} got {:?}", start_loc, token.lexeme)),
+            }
+        } else {
+            Err(format!("Unexpected EOF at {}", self.peek_back().unwrap().loc))
+        }
+    }
+
+    fn binop_prec(kind: TokenKind) -> u8 {
+        match kind {
+            TokenKind::AmperAmper | TokenKind::PipePipe => 2,
+            TokenKind::EqEq | TokenKind::BangEq | TokenKind::Lt | TokenKind::Lte | TokenKind::Gt | TokenKind::Gte => 5,
+            TokenKind::Pipe | TokenKind::Amper | TokenKind::Caret | TokenKind::LtLt | TokenKind::GtGt => 10,
+            TokenKind::Plus | TokenKind::Minus => 15,
+            TokenKind::Star | TokenKind::Slash | TokenKind::Percent => 20,
+            _ => 0,
+        }
+    }
+
+    fn peek_binop(&mut self) -> Option<(Token<'_>, u8)> {
+        let token = if let Some(token) = self.tokens.get(self.current) {
+            token
+        } else {
+            return None;
+        };
+        let prec = Self::binop_prec(token.kind);
+        if prec == 0 {
+            return None;
+        } else {
+            self.current += 1;
+            return Some((token.clone(), prec));
+        }
+    }
+
+    fn parse_binop_expr(&mut self, lhs: &mut AstExpr, prec: u8) -> Result<AstExpr, String> {
         unimplemented!();
     }
 

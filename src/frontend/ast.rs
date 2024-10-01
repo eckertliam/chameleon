@@ -76,6 +76,24 @@ pub enum AstExpr {
     },
 }
 
+impl AstExpr {
+    pub fn loc(&self) -> Loc {
+        match self {
+            AstExpr::Int { loc, .. } => *loc,
+            AstExpr::Float { loc, .. } => *loc,
+            AstExpr::String { loc, .. } => *loc,
+            AstExpr::Bool { loc, .. } => *loc,
+            AstExpr::Ident { loc, .. } => *loc,
+            AstExpr::Char { loc, .. } => *loc,
+            AstExpr::BinOp { loc, .. } => *loc,
+            AstExpr::UnOp { loc, .. } => *loc,
+            AstExpr::Call { loc, .. } => *loc,
+            AstExpr::Array { loc, .. } => *loc,
+            AstExpr::Block { loc, .. } => *loc,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub enum BinOpKind {
     Add,
@@ -86,6 +104,8 @@ pub enum BinOpKind {
     And,
     Or,
     Xor,
+    BitOr,
+    BitAnd,
     Shl,
     Shr,
     Eq,
