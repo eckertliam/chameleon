@@ -207,7 +207,50 @@ fn parse_primary_expr<'src>(iter: &'src mut TokenIter) -> Result<AstExpr, String
                 Err(format!("Expected string literal at {} got {:?}", start_loc, token.lexeme))
             }
         }
-        // TODO: implmeent all remaining primary expressions
+        TokenKind::True | TokenKind::False => {
+            let value = token.kind == TokenKind::True;
+            let mut expr = AstExpr::Bool { value, loc: start_loc };
+            return parse_postfix(iter, &mut expr)
+        }
+        TokenKind::Char => {
+            if let Some(lexeme) = token.lexeme {
+                let mut expr = AstExpr::Char { value: lexeme.chars().next().unwrap(), loc: start_loc };
+                return parse_postfix(iter, &mut expr)
+            } else {
+                Err(format!("Expected char literal at {} got {:?}", start_loc, token.lexeme))
+            }
+        }
+        TokenKind::Lbracket => {
+            let mut values = Vec::new();
+            loop {
+                if let Some(token) = peek(iter) {
+                    if token.kind == TokenKind::Rbracket {
+                        advance(iter);
+                        break;
+                    }
+                    match parse_expr(iter) {
+                        Ok(expr) => values.push(expr),
+                        Err(e) => return Err(e),
+                    }
+                    if let Some(token) = peek(iter) {
+                        if token.kind == TokenKind::Comma {
+                            advance(iter);
+                        } else if token.kind == TokenKind::Rbracket {
+                            advance(iter);
+                            break;
+                        } else {
+                            return Err(format!("Expected ',' or ']' at {} got {:?}", token.loc, token.lexeme));
+                        }
+                    } else {
+                        return Err(format!("Unexpected EOF at {}", peek_back(iter).unwrap().loc));
+                    }
+                } else {
+                    return Err(format!("Unexpected EOF at {}", peek_back(iter).unwrap().loc));
+                }
+            }
+            let mut expr = AstExpr::Array { values, loc: start_loc };
+            return parse_postfix(iter, &mut expr)
+        }
         _ => Err(format!("Unexpected token at {} got {:?}", start_loc, token.lexeme)),
     }
 }
