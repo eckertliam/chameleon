@@ -258,8 +258,58 @@ fn parse_primary_expr<'src>(iter: &'src mut TokenIter) -> Result<AstExpr, String
 
 /// Checks for postfix expressions like function calls, array indexing, etc. then passes expr to parse_binop_expr
 fn parse_postfix<'src>(iter: &'src mut TokenIter, lhs: &mut AstExpr) -> Result<AstExpr, String> {
-    // TODO: implement postfix expressions
-    unimplemented!();
+    if let Some(token) = peek(iter) {
+        match token.kind {
+            TokenKind::Lparen => {
+                let start_loc = advance(iter).unwrap().loc;
+                let mut args = Vec::new();
+                loop {
+                    if let Some(token) = peek(iter) {
+                        if token.kind == TokenKind::Rparen {
+                            advance(iter);
+                            break;
+                        }
+                        match parse_expr(iter) {
+                            Ok(expr) => args.push(expr),
+                            Err(e) => return Err(e),
+                        }
+                        if let Some(token) = peek(iter) {
+                            if token.kind == TokenKind::Comma {
+                                advance(iter);
+                            } else if token.kind == TokenKind::Rparen {
+                                advance(iter);
+                                break;
+                            } else {
+                                return Err(format!("Expected ',' or ')' at {} got {:?}", token.loc, token.lexeme));
+                            }
+                        } else {
+                            return Err(format!("Unexpected EOF at {}", peek_back(iter).unwrap().loc));
+                        }
+                    } else {
+                        return Err(format!("Unexpected EOF at {}", peek_back(iter).unwrap().loc));
+                    }
+                }
+                let callee = Box::new(lhs.clone());
+                return parse_postfix(iter, &mut AstExpr::Call { callee, args, loc: start_loc });
+            }
+            TokenKind::Lbracket => {
+                let start_loc = advance(iter).unwrap().loc;
+                match parse_expr(iter) {
+                    Ok(index) => {
+                        if let Err(token) = expect_or_err(iter, TokenKind::Rbracket) {
+                            return Err(format!("Expected ']' at {} got {:?}", token.loc, token.lexeme));
+                        }
+                        let lhs = Box::new(lhs.clone());
+                        return parse_postfix(iter, &mut AstExpr::Index { array: lhs, index: Box::new(index), loc: start_loc });
+                    }
+                    Err(e) => Err(e),
+                }
+            }
+            _ => parse_binop_expr(iter, lhs, 0),
+        }
+    } else {
+        Ok(lhs.clone())
+    }
 }
 
 fn parse_binop_expr<'src>(iter: &'src mut TokenIter, lhs: &mut AstExpr, prec: u8) -> Result<AstExpr, String> {

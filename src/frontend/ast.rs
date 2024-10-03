@@ -62,7 +62,7 @@ pub enum AstExpr {
         loc: Loc,
     },
     Call {
-        name: String,
+        callee: Box<AstExpr>,
         args: Vec<AstExpr>,
         loc: Loc,
     },
@@ -72,6 +72,11 @@ pub enum AstExpr {
     },
     Block {
         stmts: Vec<AstExpr>,
+        loc: Loc,
+    },
+    Index {
+        array: Box<AstExpr>,
+        index: Box<AstExpr>,
         loc: Loc,
     },
 }
@@ -90,6 +95,7 @@ impl AstExpr {
             AstExpr::Call { loc, .. } => *loc,
             AstExpr::Array { loc, .. } => *loc,
             AstExpr::Block { loc, .. } => *loc,
+            AstExpr::Index { loc, .. } => *loc,
         }
     }
 }
