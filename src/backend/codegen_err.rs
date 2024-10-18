@@ -1,9 +1,9 @@
-use crate::frontend::{AstExpr, BinOpKind, Loc};
+use crate::frontend::{Expr, BinOpKind, Loc};
 
 #[derive(Debug)]
 pub enum CodegenError {
     /// Error when trying to perform binop on two types that is not supported
-    UnimplementedOp(BinOpKind, AstExpr, AstExpr, Loc),
+    UnimplementedOp(BinOpKind, Expr, Expr, Loc),
     UndefinedSymbol(String, Loc),
 }
 

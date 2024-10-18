@@ -4,7 +4,7 @@ use crate::frontend::Loc;
 pub struct Program {
     pub fn_defs: Vec<FnDef>,
     /// all UDTs
-    pub user_types: HashMap<String, AstType>,
+    pub user_types: HashMap<String, Type>,
 }
 
 impl Program {
@@ -19,13 +19,13 @@ impl Program {
         self.fn_defs.push(fn_def);
     }
 
-    pub fn add_user_type(&mut self, name: String, ty: AstType) {
+    pub fn add_user_type(&mut self, name: String, ty: Type) {
         self.user_types.insert(name, ty);
     }
 }
 
 #[derive(Debug, Clone)]
-pub enum AstExpr {
+pub enum Expr {
     Int {
         value: i64,
         loc: Loc,
@@ -46,56 +46,51 @@ pub enum AstExpr {
         name: String,
         loc: Loc,
     },
-    Char {
-        value: char,
-        loc: Loc,
-    },
     BinOp {
-        lhs: Box<AstExpr>,
-        rhs: Box<AstExpr>,
+        lhs: Box<Expr>,
+        rhs: Box<Expr>,
         kind: BinOpKind,
         loc: Loc,
     },
     UnOp {
-        expr: Box<AstExpr>,
+        expr: Box<Expr>,
         kind: UnOpKind,
         loc: Loc,
     },
     Call {
-        callee: Box<AstExpr>,
-        args: Vec<AstExpr>,
+        callee: Box<Expr>,
+        args: Vec<Expr>,
         loc: Loc,
     },
     Array {
-        values: Vec<AstExpr>,
+        values: Vec<Expr>,
         loc: Loc,
     },
     Block {
-        stmts: Vec<AstExpr>,
+        stmts: Vec<Stmt>,
         loc: Loc,
     },
     Index {
-        array: Box<AstExpr>,
-        index: Box<AstExpr>,
+        array: Box<Expr>,
+        index: Box<Expr>,
         loc: Loc,
     },
 }
 
-impl AstExpr {
+impl Expr {
     pub fn loc(&self) -> Loc {
         match self {
-            AstExpr::Int { loc, .. } => *loc,
-            AstExpr::Float { loc, .. } => *loc,
-            AstExpr::String { loc, .. } => *loc,
-            AstExpr::Bool { loc, .. } => *loc,
-            AstExpr::Ident { loc, .. } => *loc,
-            AstExpr::Char { loc, .. } => *loc,
-            AstExpr::BinOp { loc, .. } => *loc,
-            AstExpr::UnOp { loc, .. } => *loc,
-            AstExpr::Call { loc, .. } => *loc,
-            AstExpr::Array { loc, .. } => *loc,
-            AstExpr::Block { loc, .. } => *loc,
-            AstExpr::Index { loc, .. } => *loc,
+            Expr::Int { loc, .. } => *loc,
+            Expr::Float { loc, .. } => *loc,
+            Expr::String { loc, .. } => *loc,
+            Expr::Bool { loc, .. } => *loc,
+            Expr::Ident { loc, .. } => *loc,
+            Expr::BinOp { loc, .. } => *loc,
+            Expr::UnOp { loc, .. } => *loc,
+            Expr::Call { loc, .. } => *loc,
+            Expr::Array { loc, .. } => *loc,
+            Expr::Block { loc, .. } => *loc,
+            Expr::Index { loc, .. } => *loc,
         }
     }
 }
@@ -129,35 +124,38 @@ pub enum UnOpKind {
 }
 
 #[derive(Debug, Clone)]
-pub enum AstStatement {
+pub enum Stmt {
     Return {
-        expr: Option<AstExpr>,
+        expr: Option<Expr>,
         loc: Loc,
     },
-    Expr(AstExpr),
+    Expr(Expr),
     LetDef {
         name: String,
-        ty: Option<AstType>,
-        value: AstExpr,
+        ty: Option<Type>,
+        value: Expr,
         loc: Loc,
     },
     ConstDef {
         name: String,
-        ty: Option<AstType>,
-        value: AstExpr,
+        ty: Option<Type>,
+        value: Expr,
+        loc: Loc,
+    },
+    Block {
+        stmts: Vec<Stmt>,
         loc: Loc,
     },
     If {
-        cond: AstExpr,
-        then_block: AstExpr,
-        else_block: Option<AstExpr>,
+        cond: Expr,
+        then_block: Box<Stmt>,
+        else_block: Option<Box<Stmt>>,
         loc: Loc,
     },
-    FnDef(FnDef),
 }
 
 #[derive(Debug, Clone)]
-pub enum AstType {
+pub enum Type {
     Float,
     Int,
     Bool,
@@ -165,23 +163,23 @@ pub enum AstType {
     String,
     UnsignedInt,
     Void,
-    Ptr(Box<AstType>),
-    Tuple(Vec<AstType>),
-    Array(Box<AstType>, usize),
-    Enum(Vec<(String, Option<AstType>)>),
-    Struct(Vec<AstType>),
+    Ptr(Box<Type>),
+    Tuple(Vec<Type>),
+    Array(Box<Type>, usize),
+    Enum(Vec<(String, Option<Type>)>),
+    Struct(Vec<Type>),
 }
 
 #[derive(Debug, Clone)]
 pub struct FnDef {
     pub name: String,
-    pub params: Vec<(String, AstType)>,
-    pub ret_ty: AstType,
-    pub body: Vec<AstStatement>,
+    pub params: Vec<(String, Type)>,
+    pub ret_ty: Type,
+    pub body: Vec<Stmt>,
 }
 
 impl FnDef {
-    pub fn new(name: String, params: Vec<(String, AstType)>, ret_ty: AstType, body: Vec<AstStatement>) -> Self {
+    pub fn new(name: String, params: Vec<(String, Type)>, ret_ty: Type, body: Vec<Stmt>) -> Self {
         Self {
             name,
             params,
@@ -190,3 +188,7 @@ impl FnDef {
         }
     }
 }
+
+// TODO: Add support for struct definitions
+// TODO: Add support for enum definitions
+// TODO: Add support for alias definitions

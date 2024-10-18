@@ -5,7 +5,6 @@ pub enum TokenKind {
     // literals
     Number,
     String,
-    Char,
     Ident,
     True,
     False,

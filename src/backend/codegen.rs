@@ -1,7 +1,7 @@
 use inkwell::{
     builder::Builder, module::Linkage, types::{AnyType, AnyTypeEnum, BasicMetadataTypeEnum, BasicType, BasicTypeEnum, FloatType, IntType}, values::{AnyValue, AnyValueEnum, BasicValue, BasicValueEnum, FloatValue, IntValue}
 };
-use crate::frontend::{AstExpr, AstStatement, AstType, BinOpKind, FnDef, Program};
+use crate::frontend::{Expr, Stmt, Type, BinOpKind, FnDef, Program};
 
 use super::{codegen_ctx::{CodegenContext, SymbolValue}, codegen_err::CodegenError};
 
@@ -17,20 +17,20 @@ where 'ctx: 'ir
      fn codegen(&self, context: &CodegenContext<'ctx>) -> IRValueResult<'ir>;
 }
 
-impl<'ctx, 'ir> Codegen<'ctx, 'ir> for AstExpr 
+impl<'ctx, 'ir> Codegen<'ctx, 'ir> for Expr 
 where 'ctx: 'ir
 {
     fn codegen(&self, codegen_context: &CodegenContext<'ctx>) -> IRValueResult<'ir> {
         match self {
-            AstExpr::Int { value, .. } => {
+            Expr::Int { value, .. } => {
                 let int_value = codegen_context.context.i64_type().const_int(*value as u64, false);
                 Ok(int_value.as_any_value_enum())
             }
-            AstExpr::Float { value, .. } => {
+            Expr::Float { value, .. } => {
                 let float_value = codegen_context.context.f64_type().const_float(*value);
                 Ok(float_value.as_any_value_enum())
             }
-            AstExpr::Ident { name, loc } => {
+            Expr::Ident { name, loc } => {
                 // we have to see if the identifier is defined in the symbol table
                 match codegen_context.symbol_table.borrow().get(name) {
                     Some(symbol_value) => {
@@ -43,7 +43,7 @@ where 'ctx: 'ir
                     None => Err(CodegenError::UndefinedSymbol(name.clone(), *loc))
                 }
             }
-            AstExpr::BinOp { lhs, rhs, kind, loc } => {
+            Expr::BinOp { lhs, rhs, kind, loc } => {
                 let lhs_val = lhs.codegen(codegen_context)?;
                 let rhs_val = rhs.codegen(codegen_context)?;
                 match kind {
@@ -139,13 +139,13 @@ where 'ctx: 'ir
     }
 }
 
-impl<'ctx, 'ir> Codegen<'ctx, 'ir> for AstStatement
+impl<'ctx, 'ir> Codegen<'ctx, 'ir> for Stmt
 where 'ctx: 'ir
 {
     fn codegen(&self, codegen_context: &CodegenContext<'ctx>) -> IRValueResult<'ir> {
         match self {
-            AstStatement::Expr(expr) => expr.codegen(codegen_context),
-            AstStatement::ConstDef { name, ty, value, loc } => {
+            Stmt::Expr(expr) => expr.codegen(codegen_context),
+            Stmt::ConstDef { name, ty, value, loc } => {
                 // generate the IR value then convert it from an AnyValueEnum to a AnyValueEnum
                 let value = match BasicValueEnum::try_from(value.codegen(codegen_context)?) {
                     Ok(basic_val) => basic_val,
@@ -165,7 +165,7 @@ where 'ctx: 'ir
                 codegen_context.symbol_table.borrow_mut().insert(name.clone(), symbol_value);
                 Ok(store_instr.as_any_value_enum())
             }
-            AstStatement::LetDef { name, ty, value, .. } => {
+            Stmt::LetDef { name, ty, value, .. } => {
                 // generate the IR value then convert it from an AnyValueEnum to a AnyValueEnum
                 let value = match BasicValueEnum::try_from(value.codegen(codegen_context)?) {
                     Ok(basic_val) => basic_val,
@@ -185,7 +185,7 @@ where 'ctx: 'ir
                 codegen_context.symbol_table.borrow_mut().insert(name.clone(), symbol_value);
                 Ok(store_instr.as_any_value_enum())
             }
-            AstStatement::Return { expr, loc } => {
+            Stmt::Return { expr, loc } => {
                 let return_expr = if let Some(e) = expr {
                     let ir_expr = match BasicValueEnum::try_from(e.codegen(codegen_context)?) {
                         Ok(basic_val) => basic_val,
@@ -212,14 +212,14 @@ where 'ctx: 'ir
     }
 }
 
-impl<'ctx, 'ir> AstType
+impl<'ctx, 'ir> Type
 where 'ctx: 'ir
 {
     fn codegen(&self, codegen_context: &CodegenContext<'ctx>) -> IRTypeResult<'ir> {
         match self {
-            AstType::Int => Ok(codegen_context.context.i64_type().as_any_type_enum()),
-            AstType::Float => Ok(codegen_context.context.f64_type().as_any_type_enum()),
-            AstType::UnsignedInt => Ok(codegen_context.context.i64_type().as_any_type_enum()),
+            Type::Int => Ok(codegen_context.context.i64_type().as_any_type_enum()),
+            Type::Float => Ok(codegen_context.context.f64_type().as_any_type_enum()),
+            Type::UnsignedInt => Ok(codegen_context.context.i64_type().as_any_type_enum()),
             _ => unimplemented!("codegen for {:?} has not been implemented", self)
         }
     }
