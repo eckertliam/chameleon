@@ -1,318 +1,71 @@
-use std::iter::Peekable;
-use std::slice::Iter;
+use std::collections::HashMap;
 
-use super::{tokenizer::{Token, TokenKind, Tokenizer}, AstExpr, AstStatement, AstType, BinOpKind};
+use super::{tokenizer::{Token, TokenKind, Tokenizer}, 
+    AstExpr, AstStatement, AstType, BinOpKind, UnOpKind};
 
-struct TokenIter<'src> {
-    tokens: Peekable<Iter<'src, Token<'src>>>,
-    prev: Option<&'src Token<'src>>,
+struct Parser<'src> {
+    tokens: Vec<Token<'src>>,
+    pos: usize,
 }
 
-impl<'src> From<&'src Vec<Token<'src>>> for TokenIter<'src> {
-    fn from(tokens: &'src Vec<Token<'src>>) -> Self {
+impl<'src> Parser<'src> {
+    pub fn new(tokens: Vec<Token<'src>>) -> Self {
         Self {
-            tokens: tokens.iter().peekable(),
-            prev: None,
+            tokens,
+            pos: 0,
         }
     }
-}
 
-fn peek_back<'src>(iter: &'src TokenIter) -> Option<&'src Token<'src>> {
-    iter.prev
-}
-
-fn peek<'src>(iter: &'src mut TokenIter) -> Option<&'src Token<'src>> {
-    iter.tokens.peek().copied()
-}
-
-fn advance<'src>(iter: &'src mut TokenIter) -> Option<&'src Token<'src>> {
-    iter.prev = iter.tokens.next();
-    iter.prev
-}
-
-fn expect<'src>(iter: &'src mut TokenIter, kind: TokenKind) -> Option<&'src Token<'src>> {
-    if let Some(token) = peek(iter) {
-        if token.kind == kind {
-            return advance(iter);
-        }
-    }
-    None
-}
-
-fn expect_or_err<'src>(iter: &'src mut TokenIter, kind: TokenKind) -> Result<&'src Token<'src>, &'src Token<'src>> {
-    if let Some(token) = iter.tokens.peek() {
-        if token.kind == kind {
-            return Ok(iter.tokens.next().unwrap());
-        } else {
-            return Err(token);
-        }
-    } else {
-        return Err(iter.prev.unwrap());
-    }
-}
-
-fn parse_statement<'src>(iter: &'src mut TokenIter) -> Result<AstStatement, String> {
-    let token = if let Some(token) = peek(iter) {
+    fn consume(&mut self) -> Token<'src> {
+        let token = self.tokens[self.pos].clone();
+        self.pos += 1;
         token
-    } else {
-        return Err(format!("Unexpected EOF at {}", peek_back(iter).unwrap().loc));
-    };
+    }
+
+    fn peek(&self) -> Token<'src> {
+        self.tokens[self.pos].clone()
+    }
+
+    fn is_at_end(&self) -> bool {
+        self.pos >= self.tokens.len()
+    }
+}
+
+fn expr(parser: &mut Parser, precedence: u8) -> AstExpr {
+    let token = parser.consume();
+    let mut lhs = prefix(parser, &token);
+    // TODO: parse infix expressions
+}
+
+fn prefix(parser: &mut Parser, token: &Token) -> AstExpr {
     match token.kind {
-        TokenKind::Const => parse_var_decl(iter, false),
-        TokenKind::Let => parse_var_decl(iter, true),
-        TokenKind::Return => parse_return(iter),
-        _ => Err(format!("Unexpected token {} at {}", token.lexeme.unwrap_or("None"), token.loc)),
+        TokenKind::Ident => ident(parser, token),
+        TokenKind::Minus => minus(parser, token),
+        TokenKind::Bang => bang(parser, token),
+        _ => panic!("Unexpected token: {:?} at {}", token.kind, token.loc),
     }
 }
 
-fn parse_var_decl<'src>(iter: &'src mut TokenIter, mutable: bool) -> Result<AstStatement, String> {
-    let start_loc = advance(iter).unwrap().loc;
-    let ident = match expect_or_err(iter, TokenKind::Ident) {
-        Ok(token) => token.lexeme.unwrap().to_string(),
-        Err(token) => return Err(format!("Expected identifier at {} got {:?}", token.loc, token.lexeme)),
-    };
-    let ty = if let Some(_) = expect(iter, TokenKind::Colon) {
-        match parse_type(iter) {
-            Ok(ty) => Some(ty),
-            Err(e) => return Err(e),
-        }
-    } else {
-        None
-    };
-    if let Err(token) = expect_or_err(iter, TokenKind::Eq) {
-        return Err(format!("Expected '=' at {} got {:?}", token.loc, token.lexeme));
-    }
-    let expr = match parse_expr(iter) {
-        Ok(expr) => expr,
-        Err(e) => return Err(e),
-    };
-    if let Err(token) = expect_or_err(iter, TokenKind::Semicolon) {
-        return Err(format!("Expected ';' at {} got {:?}", token.loc, token.lexeme));
-    }
-    if mutable {
-        Ok(AstStatement::LetDef { 
-            name: ident, 
-            ty, 
-            value: expr, 
-            loc: start_loc
-        })
-    } else {
-        Ok(AstStatement::ConstDef {
-            name: ident,
-            ty,
-            value: expr,
-            loc: start_loc,
-        })
+fn ident(parser: &mut Parser, token: &Token) -> AstExpr {
+    let name = token.lexeme.expect(&format!("Expected lexeme for token: {:?} at {}", token.kind, token.loc)).to_string();
+    AstExpr::Ident {
+        name,
+        loc: token.loc,
     }
 }
 
-fn parse_return<'src>(iter: &'src mut TokenIter) -> Result<AstStatement, String> {
-    let start_loc = advance(iter).unwrap().loc;
-    match peek(iter) {
-        Some(token) if token.kind == TokenKind::Semicolon => {
-            advance(iter);
-            Ok(AstStatement::Return { expr: None, loc: start_loc })
-        }
-        Some(_) => {
-            match parse_expr(iter) {
-                Ok(expr) => {
-                    if let Err(token) = expect_or_err(iter, TokenKind::Semicolon) {
-                        return Err(format!("Expected ';' at {} got {:?}", token.loc, token.lexeme));
-                    }
-                    Ok(AstStatement::Return { expr: Some(expr), loc: start_loc })
-                }
-                Err(e) => Err(e),
+macro_rules! define_unary_op {
+    ($func_id:ident, $op_kind:expr) => {
+        fn $func_id(parser: &mut Parser, token: &Token) -> AstExpr {
+            AstExpr::UnOp {
+                kind: $op_kind,
+                expr: Box::new(expr(parser, 0)),
+                loc: token.loc,
             }
         }
-        None => Err(format!("Unexpected EOF at {}", start_loc)),
     }
 }
 
-fn parse_type<'src>(iter: &'src mut TokenIter) -> Result<AstType, String> {
-    unimplemented!();
-}
-
-fn parse_expr<'src>(iter: &'src mut TokenIter) -> Result<AstExpr, String> {
-    unimplemented!();
-}
-
-fn binop_prec(kind: TokenKind) -> u8 {
-    match kind {
-        TokenKind::AmperAmper | TokenKind::PipePipe => 2,
-        TokenKind::EqEq | TokenKind::BangEq | TokenKind::Lt | TokenKind::Lte | TokenKind::Gt | TokenKind::Gte => 5,
-        TokenKind::Pipe | TokenKind::Amper | TokenKind::Caret | TokenKind::LtLt | TokenKind::GtGt => 10,
-        TokenKind::Plus | TokenKind::Minus => 15,
-        TokenKind::Star | TokenKind::Slash | TokenKind::Percent => 20,
-        _ => 0,
-    }
-}
-
-fn peek_binop<'src>(iter: &'src mut TokenIter) -> Option<(&'src Token<'src>, u8)> {
-    if let Some(token) = peek(iter) {
-        let prec = binop_prec(token.kind);
-        if prec > 0 {
-            return Some((token, prec));
-        }
-    }
-    None
-}
-
-fn parse_primary_expr<'src>(iter: &'src mut TokenIter) -> Result<AstExpr, String> {
-    let token = if let Some(token) = advance(iter) {
-        token
-    } else {
-        return Err(format!("Unexpected EOF at {}", peek_back(iter).unwrap().loc));
-    };
-    let start_loc = token.loc;
-    match token.kind {
-        TokenKind::Ident => {
-            if let Some(lexeme) = token.lexeme {
-                let mut expr = AstExpr::Ident { name: lexeme.to_string(), loc: start_loc };
-                return parse_postfix(iter, &mut expr)
-            } else {
-                Err(format!("Expected identifier at {} got {:?}", start_loc, token.lexeme))
-            }
-        }
-        TokenKind::Number => {
-            if let Some(lexeme) = token.lexeme {
-                if let Ok(value) = lexeme.parse::<i64>() {
-                    let mut expr = AstExpr::Int { value, loc: start_loc };
-                    return parse_postfix(iter, &mut expr)
-                } else if let Ok(value) = lexeme.parse::<f64>() {
-                    let mut expr = AstExpr::Float { value, loc: start_loc };
-                    return parse_postfix(iter, &mut expr)
-                } else {
-                    return Err(format!("Invalid number literal at {} got {:?}", start_loc, token.lexeme));
-                }
-            } else {
-                Err(format!("Expected number literal at {} got {:?}", start_loc, token.lexeme))
-            }
-        }
-        TokenKind::Lparen => {
-            match parse_expr(iter) {
-                Ok(expr) => {
-                    if let Err(token) = expect_or_err(iter, TokenKind::Rparen) {
-                        return Err(format!("Expected ')' at {} got {:?}", token.loc, token.lexeme));
-                    }
-                    Ok(expr)
-                }
-                Err(e) => Err(e),
-            }
-        }
-        TokenKind::String => {
-            if let Some(lexeme) = token.lexeme {
-                let mut lhs = AstExpr::String { value: lexeme.to_string(), loc: start_loc };
-                return parse_postfix(iter, &mut lhs)
-            } else {
-                Err(format!("Expected string literal at {} got {:?}", start_loc, token.lexeme))
-            }
-        }
-        TokenKind::True | TokenKind::False => {
-            let value = token.kind == TokenKind::True;
-            let mut expr = AstExpr::Bool { value, loc: start_loc };
-            return parse_postfix(iter, &mut expr)
-        }
-        TokenKind::Char => {
-            if let Some(lexeme) = token.lexeme {
-                let mut expr = AstExpr::Char { value: lexeme.chars().next().unwrap(), loc: start_loc };
-                return parse_postfix(iter, &mut expr)
-            } else {
-                Err(format!("Expected char literal at {} got {:?}", start_loc, token.lexeme))
-            }
-        }
-        TokenKind::Lbracket => {
-            let mut values = Vec::new();
-            loop {
-                if let Some(token) = peek(iter) {
-                    if token.kind == TokenKind::Rbracket {
-                        advance(iter);
-                        break;
-                    }
-                    match parse_expr(iter) {
-                        Ok(expr) => values.push(expr),
-                        Err(e) => return Err(e),
-                    }
-                    if let Some(token) = peek(iter) {
-                        if token.kind == TokenKind::Comma {
-                            advance(iter);
-                        } else if token.kind == TokenKind::Rbracket {
-                            advance(iter);
-                            break;
-                        } else {
-                            return Err(format!("Expected ',' or ']' at {} got {:?}", token.loc, token.lexeme));
-                        }
-                    } else {
-                        return Err(format!("Unexpected EOF at {}", peek_back(iter).unwrap().loc));
-                    }
-                } else {
-                    return Err(format!("Unexpected EOF at {}", peek_back(iter).unwrap().loc));
-                }
-            }
-            let mut expr = AstExpr::Array { values, loc: start_loc };
-            return parse_postfix(iter, &mut expr)
-        }
-        _ => Err(format!("Unexpected token at {} got {:?}", start_loc, token.lexeme)),
-    }
-}
-
-
-/// Checks for postfix expressions like function calls, array indexing, etc. then passes expr to parse_binop_expr
-fn parse_postfix<'src>(iter: &'src mut TokenIter, lhs: &mut AstExpr) -> Result<AstExpr, String> {
-    if let Some(token) = peek(iter) {
-        match token.kind {
-            TokenKind::Lparen => {
-                let start_loc = advance(iter).unwrap().loc;
-                let mut args = Vec::new();
-                loop {
-                    if let Some(token) = peek(iter) {
-                        if token.kind == TokenKind::Rparen {
-                            advance(iter);
-                            break;
-                        }
-                        match parse_expr(iter) {
-                            Ok(expr) => args.push(expr),
-                            Err(e) => return Err(e),
-                        }
-                        if let Some(token) = peek(iter) {
-                            if token.kind == TokenKind::Comma {
-                                advance(iter);
-                            } else if token.kind == TokenKind::Rparen {
-                                advance(iter);
-                                break;
-                            } else {
-                                return Err(format!("Expected ',' or ')' at {} got {:?}", token.loc, token.lexeme));
-                            }
-                        } else {
-                            return Err(format!("Unexpected EOF at {}", peek_back(iter).unwrap().loc));
-                        }
-                    } else {
-                        return Err(format!("Unexpected EOF at {}", peek_back(iter).unwrap().loc));
-                    }
-                }
-                let callee = Box::new(lhs.clone());
-                return parse_postfix(iter, &mut AstExpr::Call { callee, args, loc: start_loc });
-            }
-            TokenKind::Lbracket => {
-                let start_loc = advance(iter).unwrap().loc;
-                match parse_expr(iter) {
-                    Ok(index) => {
-                        if let Err(token) = expect_or_err(iter, TokenKind::Rbracket) {
-                            return Err(format!("Expected ']' at {} got {:?}", token.loc, token.lexeme));
-                        }
-                        let lhs = Box::new(lhs.clone());
-                        return parse_postfix(iter, &mut AstExpr::Index { array: lhs, index: Box::new(index), loc: start_loc });
-                    }
-                    Err(e) => Err(e),
-                }
-            }
-            _ => parse_binop_expr(iter, lhs, 0),
-        }
-    } else {
-        Ok(lhs.clone())
-    }
-}
-
-fn parse_binop_expr<'src>(iter: &'src mut TokenIter, lhs: &mut AstExpr, prec: u8) -> Result<AstExpr, String> {
-    // TODO: implement binary operator parsing
-    unimplemented!();
-}
+define_unary_op!(minus, UnOpKind::Neg);
+define_unary_op!(bang, UnOpKind::Not);
+define_unary_op!(not, UnOpKind::Not);

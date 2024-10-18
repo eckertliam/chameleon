@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TokenKind {
     // literals
     Number,
@@ -78,7 +78,7 @@ impl Default for Loc {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Token<'src> {
     pub kind: TokenKind,
     pub lexeme: Option<&'src str>,
@@ -335,5 +335,18 @@ impl<'src> Tokenizer<'src> {
         }
         self.tokens.push(Token::simple(TokenKind::Eof, self.loc));
         &self.tokens
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_tokenize() {
+        let src = "fn main() -> int:\n    return 0;";
+        let mut tokenizer = Tokenizer::new(src);
+        let tokens = tokenizer.tokenize();
+        println!("{:?}", tokens);
     }
 }

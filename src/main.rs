@@ -1,3 +1,6 @@
+#[macro_use]
+extern crate lazy_static;
+
 use backend::CodegenContext;
 use frontend::{AstExpr, AstStatement, AstType, FnDef, Loc, Program};
 use inkwell::context::Context;

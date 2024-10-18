@@ -153,6 +153,7 @@ pub enum AstStatement {
         else_block: Option<AstExpr>,
         loc: Loc,
     },
+    FnDef(FnDef),
 }
 
 #[derive(Debug, Clone)]
@@ -171,6 +172,7 @@ pub enum AstType {
     Struct(Vec<AstType>),
 }
 
+#[derive(Debug, Clone)]
 pub struct FnDef {
     pub name: String,
     pub params: Vec<(String, AstType)>,
