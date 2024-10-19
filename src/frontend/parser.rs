@@ -382,8 +382,95 @@ fn if_stmt(parser: &mut Parser, token: Token) -> Stmt {
     }
 }
 
-// TODO: add parsing for type annotations
+// type annotation parsing
+
+/// parse a type annotation
+/// 
+/// expects to start with TokenKind Ident, Lbracket, or Lparen
+/// will panic if it doesn't
+fn parse_type_annotation(parser: &mut Parser) -> Type {
+    let token = parser.consume();
+    // will either start with TokenKind Ident, Lbracket, or Lparen
+    match token.kind {
+        TokenKind::Ident => {
+            let name = token.lexeme.expect(&format!("Expected lexeme for token: {:?} at {}", token.kind, token.loc)).to_string();
+            // check for generic args
+            if parser.peek().kind == TokenKind::Lt {
+                // consume the <
+                let token = parser.consume();
+                let generic_args = parse_generic_args(parser);
+                return Type::Generic(name, generic_args, token.loc)
+            } 
+            // match on the primitive type
+            // otherwise it's an alias
+            match name.as_str() {
+                "i8" => Type::I8(token.loc),
+                "i16" => Type::I16(token.loc),
+                "i32" => Type::I32(token.loc),
+                "i64" => Type::I64(token.loc),
+                "u8" => Type::U8(token.loc),
+                "u16" => Type::U16(token.loc),
+                "u32" => Type::U32(token.loc),
+                "u64" => Type::U64(token.loc),
+                "f32" => Type::F32(token.loc),
+                "f64" => Type::F64(token.loc),
+                "bool" => Type::Bool(token.loc),
+                "void" => Type::Void(token.loc),
+                _ => Type::Alias(name, token.loc),
+            }
+        }
+        TokenKind::Lbracket => parse_array_type(parser, &token),
+        TokenKind::Lparen => parse_tuple_type(parser, &token),
+        _ => panic!("Expected identifier at {}", token.loc),
+    }
+}
+
+/// parse an array type
+/// 
+/// panics if it doesn't close with a ]
+fn parse_array_type(parser: &mut Parser, token: &Token) -> Type {
+    let loc = token.loc;
+    let elem_type = parse_type_annotation(parser);
+    // expect a semicolon
+    if parser.consume().kind != TokenKind::Semicolon {
+        panic!("Expected semicolon at {}", parser.peek().loc);
+    }
+    // parse the size
+    let size = expr(parser, 0);
+
+    Type::Array(Box::new(elem_type), size, loc)
+}
+
+
+/// parse a tuple type
+/// 
+/// panics if it doesn't close with a )
+fn parse_tuple_type(parser: &mut Parser, token: &Token) -> Type {
+    let loc = token.loc;
+    let mut types = Vec::new();
+    while parser.peek().kind != TokenKind::Rparen {
+        types.push(parse_type_annotation(parser));
+    }
+    if parser.consume().kind != TokenKind::Rparen {
+        panic!("Expected ) at {}", parser.peek().loc);
+    }
+    Type::Tuple(types, loc)
+}
+
+/// parse a generic argument list
+/// 
+/// panics if it doesn't close with a >
+fn parse_generic_args(parser: &mut Parser) -> Vec<Type> {
+    let mut args = Vec::new();
+    while parser.peek().kind != TokenKind::Gt {
+        args.push(parse_type_annotation(parser));
+    }
+    args
+}
+
+// TODO: add parsing for generic contexts
 // TODO: add parsing for function definitions
 // TODO: add parsing for struct definitions
 // TODO: add parsing for enum definitions
 // TODO: add parsing for alias definitions
+// TODO: add parsing for trait definitions

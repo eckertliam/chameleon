@@ -217,18 +217,18 @@ where 'ctx: 'ir
 {
     fn codegen(&self, codegen_context: &CodegenContext<'ctx>) -> IRTypeResult<'ir> {
         match self {
-            Type::I8 => Ok(codegen_context.context.i8_type().as_any_type_enum()),
-            Type::I16 => Ok(codegen_context.context.i16_type().as_any_type_enum()),
-            Type::I32 => Ok(codegen_context.context.i32_type().as_any_type_enum()),
-            Type::I64 => Ok(codegen_context.context.i64_type().as_any_type_enum()),
-            Type::F32 => Ok(codegen_context.context.f32_type().as_any_type_enum()),
-            Type::F64 => Ok(codegen_context.context.f64_type().as_any_type_enum()),
-            Type::U8 => Ok(codegen_context.context.i8_type().as_any_type_enum()),
-            Type::U16 => Ok(codegen_context.context.i16_type().as_any_type_enum()),
-            Type::U32 => Ok(codegen_context.context.i32_type().as_any_type_enum()),
-            Type::U64 => Ok(codegen_context.context.i64_type().as_any_type_enum()),
-            Type::Bool => Ok(codegen_context.context.bool_type().as_any_type_enum()),
-            Type::Void => Ok(codegen_context.context.void_type().as_any_type_enum()),
+            Type::I8(_) => Ok(codegen_context.context.i8_type().as_any_type_enum()),
+            Type::I16(_) => Ok(codegen_context.context.i16_type().as_any_type_enum()),
+            Type::I32(_) => Ok(codegen_context.context.i32_type().as_any_type_enum()),
+            Type::I64(_) => Ok(codegen_context.context.i64_type().as_any_type_enum()),
+            Type::F32(_) => Ok(codegen_context.context.f32_type().as_any_type_enum()),
+            Type::F64(_) => Ok(codegen_context.context.f64_type().as_any_type_enum()),
+            Type::U8(_) => Ok(codegen_context.context.i8_type().as_any_type_enum()),
+            Type::U16(_) => Ok(codegen_context.context.i16_type().as_any_type_enum()),
+            Type::U32(_) => Ok(codegen_context.context.i32_type().as_any_type_enum()),
+            Type::U64(_) => Ok(codegen_context.context.i64_type().as_any_type_enum()),
+            Type::Bool(_) => Ok(codegen_context.context.bool_type().as_any_type_enum()),
+            Type::Void(_) => Ok(codegen_context.context.void_type().as_any_type_enum()),
             // TODO: add support for pointer types
             // TODO: add support for tuple types
             // TODO: add support for array types

@@ -5,7 +5,8 @@ pub struct Program {
     pub fn_defs: HashMap<String, FnDef>,
     pub struct_defs: HashMap<String, StructDef>,
     pub enum_defs: HashMap<String, EnumDef>,
-    // TODO: add support for trait definitions
+    pub alias_defs: HashMap<String, AliasDef>,
+    pub trait_defs: HashMap<String, TraitDef>,
 }
 
 #[derive(Debug, Clone)]
@@ -142,20 +143,20 @@ pub enum Stmt {
 #[derive(Debug, Clone)]
 pub enum Type {
     // Primitive types
-    I8,
-    I16,
-    I32,
-    I64,
-    U8,
-    U16,
-    U32,
-    U64,
-    F32,
-    F64,
-    Bool,
-    Void,
-    Tuple(Vec<Type>),
-    Array(Box<Type>, usize),
+    I8(Loc),
+    I16(Loc),
+    I32(Loc),
+    I64(Loc),
+    U8(Loc),
+    U16(Loc),
+    U32(Loc),
+    U64(Loc),
+    F32(Loc),
+    F64(Loc),
+    Bool(Loc),
+    Void(Loc),
+    Tuple(Vec<Type>, Loc),
+    Array(Box<Type>, Expr, Loc),
     // User-defined types
     /// An alias type
     /// 
@@ -164,14 +165,14 @@ pub enum Type {
     /// type Number = i64;
     /// let x: Number = 10;
     /// ```     
-    Alias(String),
+    Alias(String, Loc),
     /// A generic type
     /// 
     /// Example:
     /// ```
     /// let x: Vec<i64> = Vec::new();
     /// ```
-    Generic(String, Vec<Type>),
+    Generic(String, Vec<Type>, Loc),
 }
 
 /// A generic parameter
@@ -376,5 +377,68 @@ pub struct EnumDef {
     pub loc: Loc,
 }
 
-// TODO: Add support for alias definitions
-// TODO: Add support for trait definitions
+/// An alias definition
+/// 
+/// ```
+/// type Number = i64;
+/// type Point<T> = (T, T);
+/// ```
+pub struct AliasDef {
+    pub name: String,
+    pub generics: GenericContext,
+    pub ty: Type,
+    pub loc: Loc,
+}
+
+/// A required fn in a trait
+/// 
+/// ```
+/// trait Add {
+///     fn add(a: T, b: T) -> T;
+/// }
+/// ```
+pub struct RequiredFn {
+    pub name: String,
+    pub generics: GenericContext,
+    pub params: Vec<(String, Type)>,
+    pub ret_ty: Type,
+    pub loc: Loc,
+}
+
+
+/// A required field in a trait
+/// 
+/// ```
+/// trait HasX {
+///     x: i32;
+/// }
+/// ```
+pub struct RequiredField {
+    pub name: String,
+    pub ty: Type,
+    pub loc: Loc,
+}
+
+/// A trait definition
+/// 
+/// ```
+/// trait HasX {
+///     // required field
+///     x: i32;
+///     // a required fn
+///     fn do_something_with_x(self) -> i32;
+///     // a given fn
+///     fn do_something_else_with_x(self) -> i32 {
+///         let y = self.do_something_with_x();
+///         return y + 1;
+///     }
+/// }
+/// ```
+pub struct TraitDef {
+    pub name: String,
+    pub generics: GenericContext,
+    pub required_fns: Vec<RequiredFn>,
+    pub given_fns: Vec<FnDef>,
+    pub required_fields: Vec<RequiredField>,
+    pub loc: Loc,
+}
