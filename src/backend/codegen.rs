@@ -296,7 +296,7 @@ impl <'ctx, 'ir> Program
 where 'ctx: 'ir
 {
     pub fn codegen(&self, codegen_context: &CodegenContext<'ctx>) -> IRResult<()> {
-        for fn_def in self.fn_defs.iter() {
+        for fn_def in self.fn_defs.values() {
             fn_def.codegen(codegen_context)?;
         }
         Ok(())

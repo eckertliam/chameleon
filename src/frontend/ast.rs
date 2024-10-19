@@ -2,26 +2,10 @@ use std::collections::HashMap;
 use crate::frontend::Loc;
 
 pub struct Program {
-    pub fn_defs: Vec<FnDef>,
-    /// all UDTs
-    pub user_types: HashMap<String, Type>,
-}
-
-impl Program {
-    pub fn new() -> Self {
-        Self {
-            fn_defs: Vec::new(),
-            user_types: HashMap::new(),
-        }
-    }
-
-    pub fn add_fn_def(&mut self, fn_def: FnDef) {
-        self.fn_defs.push(fn_def);
-    }
-
-    pub fn add_user_type(&mut self, name: String, ty: Type) {
-        self.user_types.insert(name, ty);
-    }
+    pub fn_defs: HashMap<String, FnDef>,
+    pub struct_defs: HashMap<String, StructDef>,
+    pub enum_defs: HashMap<String, EnumDef>,
+    // TODO: add support for trait definitions
 }
 
 #[derive(Debug, Clone)]
@@ -170,12 +154,12 @@ pub enum Type {
     F64,
     Bool,
     Void,
-    Ptr(Box<Type>),
     Tuple(Vec<Type>),
     Array(Box<Type>, usize),
     // User-defined types
     /// An alias type
     /// 
+    /// Example:
     /// ```
     /// type Number = i64;
     /// let x: Number = 10;
@@ -183,6 +167,7 @@ pub enum Type {
     Alias(String),
     /// A generic type
     /// 
+    /// Example:
     /// ```
     /// let x: Vec<i64> = Vec::new();
     /// ```
@@ -190,15 +175,32 @@ pub enum Type {
 }
 
 /// A generic parameter
+/// 
+/// Example:
+/// ```
+/// fn add<T: Add>(a: T, b: T) -> T {
+///     return a + b
+/// }
+/// ```
 #[derive(Debug, Clone)]
 pub struct GenericParam {
     pub name: String,
     /// The trait bounds of the generic parameter
-    pub bounds: Vec<Type>,
+    pub bounds: Vec<String>,
     pub loc: Loc,
 }
 
-/// A context for generic parameters
+/// A context for generic parameters.
+/// 
+/// A generic context is everything between the `<` and `>` in a generic type.
+/// 
+/// Example:
+/// ```
+/// struct Point<T: Add + Sub + Mul + Div> {
+///     x: T,
+///     y: T,
+/// }
+/// ```
 #[derive(Debug, Clone)]
 pub struct GenericContext {
     /// Key: generic name, Value: generic parameter
@@ -256,6 +258,13 @@ impl FnDef {
     }
 }
 
+/// A struct field
+pub struct StructField {
+    pub name: String,
+    pub ty: Type,
+    pub loc: Loc,
+}
+
 /// A struct definition
 /// 
 /// ```
@@ -267,12 +276,12 @@ impl FnDef {
 pub struct StructDef {
     pub name: String,
     pub generics: GenericContext,
-    pub fields: HashMap<String, Type>, 
+    pub fields: Vec<StructField>,
     pub loc: Loc,
 }
 
 impl StructDef {
-    pub fn new(name: String, generics: GenericContext, fields: HashMap<String, Type>, loc: Loc) -> Self {
+    pub fn new(name: String, generics: GenericContext, fields: Vec<StructField>, loc: Loc) -> Self {
         Self {
             name,
             generics,
@@ -281,5 +290,91 @@ impl StructDef {
         }
     }
 }
-// TODO: Add support for enum definitions
+
+/// An enum variant. Covers Symbol, Tuple, and Struct variants.
+pub enum EnumVariant {
+    /// A symbolic variant
+    /// 
+    /// Example:
+    /// ```
+    /// enum Color {
+    ///     Red,
+    ///     Green,
+    ///     Blue,
+    /// }
+    /// ```
+    Symbol {
+        name: String,
+        loc: Loc,
+    },
+    /// A tuple variant
+    /// 
+    /// Example:
+    /// ```
+    /// enum IP {
+    ///     V4(u8, u8, u8, u8),
+    ///     V6(String),
+    /// }
+    /// ```
+    Tuple {
+        name: String,
+        fields: Vec<Type>,
+        loc: Loc,
+    },
+    /// A struct variant
+    /// 
+    /// Example:
+    /// ```
+    /// enum Point<T> {
+    ///     FourD {
+    ///         x: T,
+    ///         y: T,
+    ///         z: T,
+    ///         w: T,
+    ///     },
+    ///     ThreeD {
+    ///         x: T,
+    ///         y: T,
+    ///         z: T,
+    ///     },
+    ///     TwoD {
+    ///         x: T,
+    ///         y: T,
+    ///     },
+    /// }
+    /// ```
+    Struct {
+        name: String,
+        fields: Vec<StructField>,
+        loc: Loc,
+    },
+}
+
+impl EnumVariant {
+    pub fn loc(&self) -> Loc {
+        match self {
+            EnumVariant::Symbol { loc, .. } => *loc,
+            EnumVariant::Tuple { loc, .. } => *loc,
+            EnumVariant::Struct { loc, .. } => *loc,
+        }
+    }
+}
+
+/// An enum definition
+/// 
+/// ```
+/// enum Color {
+///     Red,
+///     Green,
+///     Blue,
+/// }
+/// ```
+pub struct EnumDef {
+    pub name: String,
+    pub generics: GenericContext,
+    pub variants: Vec<EnumVariant>,
+    pub loc: Loc,
+}
+
 // TODO: Add support for alias definitions
+// TODO: Add support for trait definitions
