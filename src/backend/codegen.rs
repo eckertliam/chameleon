@@ -217,9 +217,25 @@ where 'ctx: 'ir
 {
     fn codegen(&self, codegen_context: &CodegenContext<'ctx>) -> IRTypeResult<'ir> {
         match self {
-            Type::Int => Ok(codegen_context.context.i64_type().as_any_type_enum()),
-            Type::Float => Ok(codegen_context.context.f64_type().as_any_type_enum()),
-            Type::UnsignedInt => Ok(codegen_context.context.i64_type().as_any_type_enum()),
+            Type::I8 => Ok(codegen_context.context.i8_type().as_any_type_enum()),
+            Type::I16 => Ok(codegen_context.context.i16_type().as_any_type_enum()),
+            Type::I32 => Ok(codegen_context.context.i32_type().as_any_type_enum()),
+            Type::I64 => Ok(codegen_context.context.i64_type().as_any_type_enum()),
+            Type::F32 => Ok(codegen_context.context.f32_type().as_any_type_enum()),
+            Type::F64 => Ok(codegen_context.context.f64_type().as_any_type_enum()),
+            Type::U8 => Ok(codegen_context.context.i8_type().as_any_type_enum()),
+            Type::U16 => Ok(codegen_context.context.i16_type().as_any_type_enum()),
+            Type::U32 => Ok(codegen_context.context.i32_type().as_any_type_enum()),
+            Type::U64 => Ok(codegen_context.context.i64_type().as_any_type_enum()),
+            Type::Bool => Ok(codegen_context.context.bool_type().as_any_type_enum()),
+            Type::Void => Ok(codegen_context.context.void_type().as_any_type_enum()),
+            // TODO: add support for pointer types
+            // TODO: add support for tuple types
+            // TODO: add support for array types
+            // TODO: add support for generic types
+            // TODO: add support for alias types
+            // TODO: add support for struct types
+            // TODO: add support for enum types
             _ => unimplemented!("codegen for {:?} has not been implemented", self)
         }
     }

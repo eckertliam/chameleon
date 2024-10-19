@@ -154,41 +154,132 @@ pub enum Stmt {
     },
 }
 
+/// All type annotations
 #[derive(Debug, Clone)]
 pub enum Type {
-    Float,
-    Int,
+    // Primitive types
+    I8,
+    I16,
+    I32,
+    I64,
+    U8,
+    U16,
+    U32,
+    U64,
+    F32,
+    F64,
     Bool,
-    Char,
-    String,
-    UnsignedInt,
     Void,
     Ptr(Box<Type>),
     Tuple(Vec<Type>),
     Array(Box<Type>, usize),
-    Enum(Vec<(String, Option<Type>)>),
-    Struct(Vec<Type>),
+    // User-defined types
+    /// An alias type
+    /// 
+    /// ```
+    /// type Number = i64;
+    /// let x: Number = 10;
+    /// ```     
+    Alias(String),
+    /// A generic type
+    /// 
+    /// ```
+    /// let x: Vec<i64> = Vec::new();
+    /// ```
+    Generic(String, Vec<Type>),
 }
 
+/// A generic parameter
 #[derive(Debug, Clone)]
+pub struct GenericParam {
+    pub name: String,
+    /// The trait bounds of the generic parameter
+    pub bounds: Vec<Type>,
+    pub loc: Loc,
+}
+
+/// A context for generic parameters
+#[derive(Debug, Clone)]
+pub struct GenericContext {
+    /// Key: generic name, Value: generic parameter
+    generics: HashMap<String, GenericParam>,
+}
+
+impl GenericContext {
+    pub fn new() -> Self {
+        Self {
+            generics: HashMap::new(),
+        }
+    }
+
+    /// Add a generic parameter to the context.
+    /// On conflict, return error with location of existing generic.
+    pub fn add_generic(&mut self, param: GenericParam) -> Result<(), String> {
+        if let Some(existing) = self.generics.get(&param.name) {
+            return Err(format!("Generic parameter {} already exists at {}", param.name, existing.loc));
+        }
+        self.generics.insert(param.name.clone(), param);
+        Ok(())
+    }
+
+    pub fn get_generic(&self, name: &str) -> Option<&GenericParam> {
+        self.generics.get(name)
+    }
+}
+
+/// A function definition
+/// 
+/// ```
+/// fn add<T>(a: T, b: T) -> T {
+///     return a + b
+/// }
+/// ```
 pub struct FnDef {
     pub name: String,
+    pub generics: GenericContext,
     pub params: Vec<(String, Type)>,
     pub ret_ty: Type,
     pub body: Vec<Stmt>,
+    pub loc: Loc,
 }
 
 impl FnDef {
-    pub fn new(name: String, params: Vec<(String, Type)>, ret_ty: Type, body: Vec<Stmt>) -> Self {
+    pub fn new(name: String, generics: GenericContext, params: Vec<(String, Type)>, ret_ty: Type, body: Vec<Stmt>, loc: Loc) -> Self {
         Self {
             name,
+            generics,
             params,
             ret_ty,
             body,
+            loc,
         }
     }
 }
 
-// TODO: Add support for struct definitions
+/// A struct definition
+/// 
+/// ```
+/// struct Point<T> {
+///     x: T,
+///     y: T,
+/// }
+/// ```
+pub struct StructDef {
+    pub name: String,
+    pub generics: GenericContext,
+    pub fields: HashMap<String, Type>, 
+    pub loc: Loc,
+}
+
+impl StructDef {
+    pub fn new(name: String, generics: GenericContext, fields: HashMap<String, Type>, loc: Loc) -> Self {
+        Self {
+            name,
+            generics,
+            fields,
+            loc,
+        }
+    }
+}
 // TODO: Add support for enum definitions
 // TODO: Add support for alias definitions
