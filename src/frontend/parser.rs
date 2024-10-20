@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use super::{tokenizer::{Token, TokenKind, Tokenizer}, BinOpKind, Expr, GenericContext, GenericParam, Stmt, Type, UnOpKind};
+use super::{tokenizer::{Token, TokenKind, Tokenizer}, BinOpKind, Expr, FnDef, GenericContext, GenericParam, Stmt, Type, UnOpKind};
 
 struct Parser<'src> {
     tokens: Vec<Token<'src>>,
@@ -506,6 +506,8 @@ fn parse_generic_param(parser: &mut Parser, token: &Token) -> GenericParam {
 /// 
 /// panics if it doesn't close with a >
 fn parse_generic_context(parser: &mut Parser) -> GenericContext {
+    // consume the <
+    parser.consume();
     let mut context = GenericContext::new();
     let mut token = parser.consume();
     loop {
@@ -539,6 +541,55 @@ fn parse_generic_context(parser: &mut Parser) -> GenericContext {
 }
 
 // TODO: add parsing for function definitions
+
+fn parse_fn_params(parser: &mut Parser) -> Vec<(String, Type)> {
+    // expect a (
+    if parser.consume().kind != TokenKind::Lparen {
+        panic!("Expected ( at {}", parser.peek().loc);
+    }
+    let mut params = Vec::new();
+    loop {
+        let name = parser.consume().lexeme.expect(&format!("Expected a parameter name at {}", parser.peek().loc)).to_string();
+        // expect a :
+        if parser.consume().kind != TokenKind::Colon {
+            panic!("Expected : at {}", parser.peek().loc);
+        }
+        // parse the type
+        let ty = parse_type_annotation(parser);
+        params.push((name, ty));
+
+        if parser.peek().kind == TokenKind::Comma {
+            parser.consume();
+            continue;
+        }
+        break;
+    }
+    // expect a )
+    let token = parser.consume();
+    if token.kind != TokenKind::Rparen {
+        panic!("Unclosed parameter list at {}", parser.peek().loc);
+    }
+    params
+}
+
+fn parse_fn_def(parser: &mut Parser, token: &Token) -> FnDef {
+    let name = token.lexeme.expect(&format!("Expected lexeme for token: {:?} at {}", token.kind, token.loc)).to_string();
+    let loc = token.loc;
+    // gives an empty generic context if there are no generics
+    let generic_context = match parser.peek().kind {
+        TokenKind::Lt => parse_generic_context(parser),
+        _ => GenericContext::new(),
+    };
+    let params = parse_fn_params(parser);
+    // expect a ->
+    if parser.consume().kind != TokenKind::Arrow {
+        panic!("Expected -> at {}", parser.peek().loc);
+    }
+    let ret_ty = parse_type_annotation(parser);
+    let body = parse_block(parser, token);
+    FnDef::new(name, generic_context, params, ret_ty, body, loc)
+}
+
 // TODO: add parsing for struct definitions
 // TODO: add parsing for enum definitions
 // TODO: add parsing for alias definitions
