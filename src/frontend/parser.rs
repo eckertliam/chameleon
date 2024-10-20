@@ -34,7 +34,7 @@ impl<'src> Parser<'src> {
 // The expression parser is a simple Pratt parser 
 // Inspired by https://journal.stuffwithstuff.com/2011/03/19/pratt-parsers-expression-parsing-made-easy/
 
-// parse an expression with a given precedence
+/// parse an expression with a given precedence
 fn expr(parser: &mut Parser, precedence: u8) -> Expr {
     let token = parser.consume();
     let mut lhs = prefix(parser, &token);
@@ -68,7 +68,7 @@ fn prefix(parser: &mut Parser, token: &Token) -> Expr {
     }
 }
 
-// parse an identifier
+/// parse an identifier
 fn ident(parser: &mut Parser, token: &Token) -> Expr {
     let name = token.lexeme.expect(&format!("Expected lexeme for token: {:?} at {}", token.kind, token.loc)).to_string();
     Expr::Ident {
@@ -102,8 +102,9 @@ fn block_expr(parser: &mut Parser, token: &Token) -> Expr {
     Expr::Block { stmts, loc }
 }
 
-// parse a number
-// return an Int or Float depending on what can be parsed
+/// parse a number
+/// 
+/// returns an Int or Float depending on what can be parsed
 fn number(parser: &mut Parser, token: &Token) -> Expr {
     let value = token.lexeme.expect(&format!("Expected lexeme for token: {:?} at {}", token.kind, token.loc)).to_string();
     if let Ok(int_value) = value.parse::<i64>() {
@@ -147,7 +148,7 @@ define_unary_op!(prefix_bang, UnOpKind::Not);
 define_unary_op!(prefix_not, UnOpKind::Not);
 
 
-// parse an infix expression
+/// parse an infix expression
 fn infix(parser: &mut Parser, lhs: Expr, token: &Token) -> Expr {
     match token.kind {
         TokenKind::Plus => infix_plus(parser, lhs, token),
@@ -206,6 +207,7 @@ define_binary_op!(infix_lte, BinOpKind::Le);
 define_binary_op!(infix_gt, BinOpKind::Gt);
 define_binary_op!(infix_gte, BinOpKind::Ge);
 
+/// parse a function call
 fn infix_call(parser: &mut Parser, lhs: Expr, token: &Token) -> Expr {
     // parse arguments
     let mut args = Vec::new();
@@ -229,6 +231,7 @@ fn infix_call(parser: &mut Parser, lhs: Expr, token: &Token) -> Expr {
     }
 }
 
+/// parse an index
 fn infix_index(parser: &mut Parser, lhs: Expr, token: &Token) -> Expr {
     let index = expr(parser, 0);
     if parser.consume().kind != TokenKind::Rbracket {
@@ -242,7 +245,7 @@ fn infix_index(parser: &mut Parser, lhs: Expr, token: &Token) -> Expr {
     }
 }
 
-// returns the precedence of the operator
+/// returns the precedence of the operator
 fn get_prec(kind: TokenKind) -> u8 {
     match kind {
         TokenKind::PipePipe => 1,
@@ -264,7 +267,7 @@ fn get_prec(kind: TokenKind) -> u8 {
 // Statement parsing 
 // Statements are parsed with simple recursive descent
 
-// parse a top level statement
+/// parse a top level statement
 fn stmt(parser: &mut Parser) -> Stmt {
     let token = parser.consume();
     match token.kind {
@@ -277,6 +280,7 @@ fn stmt(parser: &mut Parser) -> Stmt {
     }
 }
 
+/// parse a return statement
 fn return_stmt(parser: &mut Parser, token: Token) -> Stmt {
     let expr = if parser.peek().kind != TokenKind::Semicolon {
         Some(expr(parser, 0))
@@ -294,6 +298,7 @@ fn return_stmt(parser: &mut Parser, token: Token) -> Stmt {
     }
 }
 
+/// parse a variable declaration
 fn var_decl(parser: &mut Parser, token: Token, mutable: bool) -> Stmt {
     let name = if let Token { kind: TokenKind::Ident, lexeme: Some(lexeme), .. } = parser.consume() {
         lexeme.to_string()
@@ -328,6 +333,7 @@ fn var_decl(parser: &mut Parser, token: Token, mutable: bool) -> Stmt {
     }
 }
 
+/// parse a block
 fn parse_block(parser: &mut Parser, token: &Token) -> Vec<Stmt> {
     let mut stmts = Vec::new();
     while parser.peek().kind != TokenKind::Rbrace && !parser.is_at_end() {
@@ -339,11 +345,13 @@ fn parse_block(parser: &mut Parser, token: &Token) -> Vec<Stmt> {
     stmts
 }
 
+/// parse a block
 fn block_stmt(parser: &mut Parser, token: Token) -> Stmt {
     let stmts = parse_block(parser, &token);
     Stmt::Block { stmts, loc: token.loc }
 }
 
+/// parse an if statement
 fn if_stmt(parser: &mut Parser, token: Token) -> Stmt {
     let cond = expr(parser, 0);
     let lbrace = parser.consume();
@@ -540,8 +548,9 @@ fn parse_generic_context(parser: &mut Parser) -> GenericContext {
     context
 }
 
-// TODO: add parsing for function definitions
-
+/// parse a function parameter list
+/// 
+/// panics if it doesn't close with a )
 fn parse_fn_params(parser: &mut Parser) -> Vec<(String, Type)> {
     // expect a (
     if parser.consume().kind != TokenKind::Lparen {
@@ -572,6 +581,7 @@ fn parse_fn_params(parser: &mut Parser) -> Vec<(String, Type)> {
     params
 }
 
+/// parse a function definition
 fn parse_fn_def(parser: &mut Parser, token: &Token) -> FnDef {
     let name = token.lexeme.expect(&format!("Expected lexeme for token: {:?} at {}", token.kind, token.loc)).to_string();
     let loc = token.loc;
