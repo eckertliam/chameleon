@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
-use super::{tokenizer::{Token, TokenKind, Tokenizer}, 
-    Expr, Stmt, Type, BinOpKind, UnOpKind};
+use super::{tokenizer::{Token, TokenKind, Tokenizer}, BinOpKind, Expr, GenericContext, GenericParam, Stmt, Type, UnOpKind};
 
 struct Parser<'src> {
     tokens: Vec<Token<'src>>,
@@ -468,7 +467,77 @@ fn parse_generic_args(parser: &mut Parser) -> Vec<Type> {
     args
 }
 
-// TODO: add parsing for generic contexts
+/// parse a generic parameter
+fn parse_generic_param(parser: &mut Parser, token: &Token) -> GenericParam {
+    let name = parser.consume().lexeme.expect(&format!("Expected a generic parameter name at {}", token.loc)).to_string();
+    let mut bounds = Vec::new();
+    if parser.peek().kind == TokenKind::Colon {
+        let mut token =parser.consume();
+        loop {
+            token = parser.consume();
+            // parse the bound
+            match token.kind {
+                TokenKind::Ident => {
+                    bounds.push(token.lexeme.expect(&format!("Expected a trait bound at {}", token.loc)).to_string());
+                }
+                _ => panic!("Expected trait bound at {}", token.loc),
+            }
+
+            if parser.is_at_end() {
+                panic!("Unexpected EOF while parsing trait bound at {}", token.loc);
+            }
+
+            token = parser.consume();
+
+            match token.kind {
+                // continue parsing the next bound
+                TokenKind::Plus => continue,
+                // done parsing bounds
+                TokenKind::Comma => break,
+                // the only valid tokens are + and ,
+                _ => panic!("Expected + or , at {}", token.loc),
+            }
+        }
+    }
+    GenericParam { name, bounds, loc: token.loc }
+}
+
+/// parse a generic context
+/// 
+/// panics if it doesn't close with a >
+fn parse_generic_context(parser: &mut Parser) -> GenericContext {
+    let mut context = GenericContext::new();
+    let mut token = parser.consume();
+    loop {
+        match context.add_generic(parse_generic_param(parser, &token)) {
+            Ok(_) => (),
+            Err(e) => panic!("{}", e),
+        };
+        
+        if parser.is_at_end() {
+            panic!("Expected > at {}", token.loc);
+        }
+
+        token = parser.consume();
+
+        match token.kind {
+            TokenKind::Comma => {
+                // consume the comma
+                parser.consume();
+                // parse the next generic param
+                continue;
+            }
+            TokenKind::Gt => {
+                // consume the >
+                parser.consume();
+                break;
+            }
+            _ => panic!("Expected , or > at {}", token.loc),
+        }
+    }
+    context
+}
+
 // TODO: add parsing for function definitions
 // TODO: add parsing for struct definitions
 // TODO: add parsing for enum definitions
