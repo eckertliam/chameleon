@@ -1,5 +1,7 @@
 use std::fmt::Display;
 
+// TODO: rewrite tokenizer to remove indent/dedent tokens and switch to a c-style syntax
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TokenKind {
     // literals
@@ -49,6 +51,11 @@ pub enum TokenKind {
     Else,
     Match,
     Return,   
+    Private,
+    Struct,
+    Enum,
+    Type,
+    Trait,
     // special tokens
     Eof,
     Indent,
@@ -218,6 +225,11 @@ impl<'src> Tokenizer<'src> {
             "return" => TokenKind::Return,
             "true" => TokenKind::True,
             "false" => TokenKind::False,
+            "private" => TokenKind::Private,
+            "struct" => TokenKind::Struct,
+            "enum" => TokenKind::Enum,
+            "type" => TokenKind::Type,
+            "trait" => TokenKind::Trait,
             _ => TokenKind::Ident,
         }
     }

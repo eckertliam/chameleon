@@ -261,6 +261,8 @@ impl FnDef {
 
 /// A struct field
 pub struct StructField {
+    // defaults to false
+    pub is_private: bool,
     pub name: String,
     pub ty: Type,
     pub loc: Loc,

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use super::{tokenizer::{Token, TokenKind, Tokenizer}, BinOpKind, Expr, FnDef, GenericContext, GenericParam, Stmt, Type, UnOpKind};
+use super::{tokenizer::{Token, TokenKind, Tokenizer}, BinOpKind, Expr, FnDef, GenericContext, GenericParam, Stmt, StructDef, StructField, Type, UnOpKind};
 
 struct Parser<'src> {
     tokens: Vec<Token<'src>>,
@@ -590,7 +590,43 @@ fn parse_fn_def(parser: &mut Parser, token: &Token) -> FnDef {
     FnDef::new(name, generic_context, params, ret_ty, body, loc)
 }
 
-// TODO: add parsing for struct definitions
+/// parse a struct definition
+fn parse_struct_def(parser: &mut Parser, token: &Token) -> StructDef {
+    let name = token.lexeme.expect(&format!("Expected lexeme for token: {:?} at {}", token.kind, token.loc)).to_string();
+    let loc = token.loc;
+    let generic_context = parse_generic_context(parser);
+    let mut fields = Vec::new();
+    let mut comma = true;
+    while parser.peek().kind != TokenKind::Rbrace && !parser.is_at_end() {
+        if !comma {
+            panic!("Expected comma at {} before next field", parser.peek().loc);
+        }
+        let is_private = matches!(parser.peek().kind, TokenKind::Private);
+        if is_private {
+            parser.consume();
+        }
+        let token = parser.consume();
+        let loc = token.loc;
+        let field_name: String = token.lexeme.expect(&format!("Expected a field name at {}", parser.peek().loc)).to_string();
+        if parser.consume().kind != TokenKind::Colon {
+            panic!("Expected : at {}", parser.peek().loc);
+        }
+        let ty = parse_type_annotation(parser);
+        fields.push(StructField { is_private, name: field_name, ty, loc });
+        if parser.peek().kind == TokenKind::Comma {
+            parser.consume();
+            comma = true;
+        } else {
+            comma = false;
+        }
+    }
+    // expect a }
+    if parser.consume().kind != TokenKind::Rbrace {
+        panic!("Expected }} at {}", parser.peek().loc);
+    }
+    StructDef::new(name, generic_context, fields, loc)
+}
+
 // TODO: add parsing for enum definitions
 // TODO: add parsing for alias definitions
 // TODO: add parsing for trait definitions
