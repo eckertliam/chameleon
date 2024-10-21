@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use super::{tokenizer::{Token, TokenKind, Tokenizer}, AliasDef, BinOpKind, EnumDef, EnumVariant, Expr, FnDef, GenericContext, GenericParam, Stmt, StructDef, StructField, Type, UnOpKind};
+use super::{tokenizer::{Token, TokenKind, Tokenizer}, ast::*};
 
 struct Parser<'src> {
     tokens: Vec<Token<'src>>,
@@ -652,6 +652,18 @@ fn parse_struct_def(parser: &mut Parser, token: &Token) -> StructDef {
 }
 
 /// parse an enum variant
+/// 
+/// example of expected input:
+/// ```
+/// enum Message {
+///     // unit variant
+///     Quit,
+///     // Struct variant
+///     Write { text: String },
+///     // Tuple variant
+///     Move(i32, i32),
+/// }
+/// ```
 fn parse_enum_variant(parser: &mut Parser, token: &Token) -> EnumVariant {
     let name = token.lexeme.expect(&format!("Expected lexeme for token: {:?} at {}", token.kind, token.loc)).to_string();
     let loc = token.loc;
@@ -687,14 +699,23 @@ fn parse_enum_variant(parser: &mut Parser, token: &Token) -> EnumVariant {
         }
         EnumVariant::Tuple { name, fields: values, loc }
     } else {
-        // parse a symbol variant
-        EnumVariant::Symbol { name, loc }
+        // parse a unit variant
+        EnumVariant::Unit { name, loc }
     }
 }
 
 /// parse an enum definition
 /// 
 /// panics if it doesn't close with a }
+/// 
+/// example of expected input:
+/// ```
+/// enum Message {
+///     Quit,
+///     Write { text: String },
+///     Move(i32, i32),
+/// }
+/// ```
 fn parse_enum_def(parser: &mut Parser, token: &Token) -> EnumDef {
     let name = token.lexeme.expect(&format!("Expected lexeme for token: {:?} at {}", token.kind, token.loc)).to_string();
     let loc = token.loc;
@@ -725,6 +746,12 @@ fn parse_enum_def(parser: &mut Parser, token: &Token) -> EnumDef {
 }
 
 /// parse an alias definition
+/// 
+/// example of expected input:
+/// ```
+/// type Number = i64;
+/// type Point<T> = (T, T);
+/// ```
 fn parse_alias_def(parser: &mut Parser, token: &Token) -> AliasDef {
     let loc = token.loc;
     let name = if let Token { kind: TokenKind::Ident, lexeme: Some(lexeme), .. } = parser.consume() {
@@ -743,4 +770,70 @@ fn parse_alias_def(parser: &mut Parser, token: &Token) -> AliasDef {
     AliasDef { name, generics, ty, loc }
 }
 
-// TODO: implement parsing for trait definitions
+/// parse a trait function
+/// 
+/// either a required function or a given function
+/// 
+/// example of expected input:
+/// ```
+/// trait HasX {
+///     // required function
+///     fn x(&self) -> i32;
+///     // given function
+///     fn do_something_with_x(self) -> i32 {
+///         self.x()
+///     }
+/// }
+/// ```
+fn parse_trait_fn(parser: &mut Parser, token: &Token) -> TraitFn {
+    let name = token.lexeme.expect(&format!("Expected lexeme for token: {:?} at {}", token.kind, token.loc)).to_string();
+    let loc = token.loc;
+    let generics = parse_generic_context(parser);
+    let params = parse_fn_params(parser);
+    let ret_ty = parse_type_annotation(parser);
+    match parser.consume().kind {
+        TokenKind::Semicolon => TraitFn::Required(RequiredFn { name, generics, params, ret_ty, loc }),
+        TokenKind::Lbrace => {
+            let body = parse_block(parser, token);
+            TraitFn::Given(GivenFn::new(name, generics, params, ret_ty, body, loc))
+        }
+        _ => panic!("Expected semicolon or {{ at {}", parser.peek().loc),
+    }
+}
+
+/// parse a required trait field
+fn parse_required_trait_field(parser: &mut Parser, token: &Token) -> RequiredField {
+    let name = token.lexeme.expect(&format!("Expected lexeme for token: {:?} at {}", token.kind, token.loc)).to_string();
+    let loc = token.loc;
+    // expect a :
+    if parser.consume().kind != TokenKind::Colon {
+        panic!("Expected : in required trait field at {}", parser.peek().loc);
+    }
+    let ty = parse_type_annotation(parser);
+    // expect a semicolon
+    if parser.consume().kind != TokenKind::Semicolon {
+        panic!("Expected semicolon at {}", parser.peek().loc);
+    }
+    RequiredField { name, ty, loc }
+}
+
+/// parse a trait definition
+fn parse_trait_def(parser: &mut Parser, token: &Token) -> TraitDef {
+    let name = token.lexeme.expect(&format!("Expected lexeme for token: {:?} at {}", token.kind, token.loc)).to_string();
+    let loc = token.loc;
+    let generics = parse_generic_context(parser);
+    let mut required_fns = Vec::new();
+    let mut given_fns = Vec::new();
+    let mut required_fields = Vec::new();
+    while parser.peek().kind != TokenKind::Rbrace && !parser.is_at_end() {
+        match parser.peek().kind {
+            TokenKind::Fn => match parse_trait_fn(parser, &parser.peek()) {
+                TraitFn::Required(required_fn) => required_fns.push(required_fn),
+                TraitFn::Given(given_fn) => given_fns.push(given_fn),
+            }
+            TokenKind::Ident => required_fields.push(parse_required_trait_field(parser, &parser.peek())),
+            _ => panic!("Expected fn or identifier at {}", parser.peek().loc),
+        }
+    }
+    TraitDef { name, generics, required_fns, given_fns, required_fields, loc }
+}

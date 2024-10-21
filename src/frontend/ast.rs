@@ -306,7 +306,7 @@ pub enum EnumVariant {
     ///     Blue,
     /// }
     /// ```
-    Symbol {
+    Unit {
         name: String,
         loc: Loc,
     },
@@ -356,7 +356,7 @@ pub enum EnumVariant {
 impl EnumVariant {
     pub fn loc(&self) -> Loc {
         match self {
-            EnumVariant::Symbol { loc, .. } => *loc,
+            EnumVariant::Unit { loc, .. } => *loc,
             EnumVariant::Tuple { loc, .. } => *loc,
             EnumVariant::Struct { loc, .. } => *loc,
         }
@@ -407,6 +407,12 @@ pub struct RequiredFn {
     pub loc: Loc,
 }
 
+pub type GivenFn = FnDef;
+
+pub enum TraitFn {
+    Required(RequiredFn),
+    Given(GivenFn),
+}
 
 /// A required field in a trait
 /// 
