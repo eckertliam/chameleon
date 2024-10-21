@@ -1,8 +1,34 @@
 // TODO: replace all panic! with Results
 
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::{self, Display}};
 
-use super::{tokenizer::{Token, TokenKind, Tokenizer}, ast::*};
+use super::{ast::*, tokenizer::{Token, TokenKind, Tokenizer}, Loc};
+
+#[derive(Debug)]
+enum ParserError<'src> {
+    UnexpectedToken {
+        token: Token<'src>,
+    },
+    ExpectedToken {
+        expected: TokenKind,
+        got: Token<'src>,
+    },
+    UnexpectedEOF {
+        loc: Loc,
+    },
+}
+
+impl<'src> fmt::Display for ParserError<'src> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnexpectedToken { token } => write!(f, "Unexpected token: {} at {}", token.error_data(), token.loc),
+            Self::ExpectedToken { expected, got } => write!(f, "Expected {} at {} but got {}", expected.as_str(), got.loc, got.error_data()),
+            Self::UnexpectedEOF { loc } => write!(f, "Unexpected EOF at {}", loc),
+        }
+    }
+}
+
+impl<'src> std::error::Error for ParserError<'src> {}
 
 struct Parser<'src> {
     tokens: Vec<Token<'src>>,
@@ -37,10 +63,9 @@ impl<'src> Parser<'src> {
 // Inspired by https://journal.stuffwithstuff.com/2011/03/19/pratt-parsers-expression-parsing-made-easy/
 
 /// parse an expression with a given precedence
-fn expr(parser: &mut Parser, precedence: u8) -> Expr {
-    let token = parser.consume();
+fn expr(parser: &mut Parser, token: &Token, precedence: u8) -> Expr {
     let mut lhs = prefix(parser, &token);
-    
+
     while get_prec(parser.peek().kind) > precedence {
         let token = parser.consume();
         lhs = infix(parser, lhs, &token);
@@ -82,14 +107,20 @@ fn ident(parser: &mut Parser, token: &Token) -> Expr {
 // parse an array
 fn array(parser: &mut Parser, token: &Token) -> Expr {
     let mut values = Vec::new();
-    while !parser.is_at_end() && parser.peek().kind != TokenKind::Rbracket {
-        values.push(expr(parser, 0));
-        if parser.peek().kind == TokenKind::Comma {
-            parser.consume();
+    // track the last token consumed
+    let mut arr_token = parser.consume();
+    loop {
+        values.push(expr(parser, &arr_token, 0));
+        arr_token = parser.consume();
+        if arr_token.kind == TokenKind::Comma {
+            arr_token = parser.consume();
+        } else {
+            break;
         }
     }
-    if parser.consume().kind != TokenKind::Rbracket {
-        panic!("Expected ] at {}", parser.peek().loc);
+    // ensure loop exited with a ]
+    if arr_token.kind != TokenKind::Rbracket {
+        panic!("Expected ] at {}", arr_token.loc);
     }
     let loc = token.loc;
     Expr::Array {
@@ -99,7 +130,7 @@ fn array(parser: &mut Parser, token: &Token) -> Expr {
 }
 
 fn block_expr(parser: &mut Parser, token: &Token) -> Expr {
-    let stmts = parse_block(parser, token);
+    let stmts = parse_block(parser);
     let loc = token.loc;
     Expr::Block { stmts, loc }
 }
@@ -136,9 +167,10 @@ fn string(parser: &mut Parser, token: &Token) -> Expr {
 macro_rules! define_unary_op {
     ($func_id:ident, $op_kind:expr) => {
         fn $func_id(parser: &mut Parser, token: &Token) -> Expr {
+            let expr_token = parser.consume();
             Expr::UnOp {
                 kind: $op_kind,
-                expr: Box::new(expr(parser, 0)),
+                expr: Box::new(expr(parser, &expr_token, 0)),
                 loc: token.loc,
             }
         }
@@ -180,10 +212,13 @@ fn infix(parser: &mut Parser, lhs: Expr, token: &Token) -> Expr {
 macro_rules! define_binary_op {
     ($func_id:ident, $op_kind:expr) => {
         fn $func_id(parser: &mut Parser, lhs: Expr, token: &Token) -> Expr {
+            let rhs_token = parser.consume();
+            // pass the pass the operator precedence and parse the rhs 
+            let rhs = expr(parser, &rhs_token, get_prec(token.kind));
             Expr::BinOp {
                 kind: $op_kind,
                 lhs: Box::new(lhs),
-                rhs: Box::new(expr(parser, get_prec(token.kind))),
+                rhs: Box::new(rhs),
                 loc: token.loc,
             }
         }
@@ -213,16 +248,20 @@ define_binary_op!(infix_gte, BinOpKind::Ge);
 fn infix_call(parser: &mut Parser, lhs: Expr, token: &Token) -> Expr {
     // parse arguments
     let mut args = Vec::new();
-    while !parser.is_at_end() && parser.peek().kind != TokenKind::Rparen {
-        args.push(expr(parser, 0));
-        if parser.peek().kind == TokenKind::Comma {
-            parser.consume();
+    let mut infix_token = parser.consume();
+    loop {
+        args.push(expr(parser, &infix_token, 0));
+        infix_token = parser.consume();
+        if infix_token.kind == TokenKind::Comma {
+            infix_token = parser.consume();
+        } else {
+            break;
         }
     }
 
-    // check for )
-    if parser.consume().kind != TokenKind::Rparen {
-        panic!("Expected ) at {}", parser.peek().loc);
+    // ensure loop exited with a )
+    if infix_token.kind != TokenKind::Rparen {
+        panic!("Expected ) at {}", infix_token.loc);
     }
 
     let loc = lhs.loc();
@@ -235,7 +274,8 @@ fn infix_call(parser: &mut Parser, lhs: Expr, token: &Token) -> Expr {
 
 /// parse an index
 fn infix_index(parser: &mut Parser, lhs: Expr, token: &Token) -> Expr {
-    let index = expr(parser, 0);
+    let index_token = parser.consume();
+    let index = expr(parser, &index_token, 0);
     if parser.consume().kind != TokenKind::Rbracket {
         panic!("Expected ] at {}", parser.peek().loc);
     }
@@ -273,19 +313,19 @@ fn get_prec(kind: TokenKind) -> u8 {
 fn stmt(parser: &mut Parser) -> Stmt {
     let token = parser.consume();
     match token.kind {
-        TokenKind::Return => return_stmt(parser, token),
-        TokenKind::Let => var_decl(parser, token, true),
-        TokenKind::Const => var_decl(parser, token, false),
-        TokenKind::Lbrace => block_stmt(parser, token),
-        TokenKind::If => if_stmt(parser, token),
-        _ => Stmt::Expr(expr(parser, 0)),
+        TokenKind::Return => return_stmt(parser, &token),
+        TokenKind::Let => var_decl(parser, &token, true),
+        TokenKind::Const => var_decl(parser, &token, false),
+        TokenKind::Lbrace => block_stmt(parser, &token),
+        TokenKind::If => if_stmt(parser, &token),
+        _ => Stmt::Expr(expr(parser, &token, 0)),
     }
 }
 
 /// parse a return statement
-fn return_stmt(parser: &mut Parser, token: Token) -> Stmt {
+fn return_stmt(parser: &mut Parser, token: &Token) -> Stmt {
     let expr = if parser.peek().kind != TokenKind::Semicolon {
-        Some(expr(parser, 0))
+        Some(expr(parser, &token, 0))
     } else {
         None
     };
@@ -301,7 +341,7 @@ fn return_stmt(parser: &mut Parser, token: Token) -> Stmt {
 }
 
 /// parse a variable declaration
-fn var_decl(parser: &mut Parser, token: Token, mutable: bool) -> Stmt {
+fn var_decl(parser: &mut Parser, token: &Token, mutable: bool) -> Stmt {
     let name = if let Token { kind: TokenKind::Ident, lexeme: Some(lexeme), .. } = parser.consume() {
         lexeme.to_string()
     } else {
@@ -311,7 +351,8 @@ fn var_decl(parser: &mut Parser, token: Token, mutable: bool) -> Stmt {
     // TODO: add type annotation parsing
     let ty = None;
 
-    let value = expr(parser, 0);
+    let value_token = parser.consume();
+    let value = expr(parser, &value_token, 0);
 
     // expect semicolon
     if parser.consume().kind != TokenKind::Semicolon {
@@ -336,7 +377,7 @@ fn var_decl(parser: &mut Parser, token: Token, mutable: bool) -> Stmt {
 }
 
 /// parse a block
-fn parse_block(parser: &mut Parser, token: &Token) -> Vec<Stmt> {
+fn parse_block(parser: &mut Parser) -> Vec<Stmt> {
     let mut stmts = Vec::new();
     while parser.peek().kind != TokenKind::Rbrace && !parser.is_at_end() {
         stmts.push(stmt(parser));
@@ -348,19 +389,22 @@ fn parse_block(parser: &mut Parser, token: &Token) -> Vec<Stmt> {
 }
 
 /// parse a block
-fn block_stmt(parser: &mut Parser, token: Token) -> Stmt {
-    let stmts = parse_block(parser, &token);
+/// 
+/// where the token is the opening {
+fn block_stmt(parser: &mut Parser, token: &Token) -> Stmt {
+    let stmts = parse_block(parser);
     Stmt::Block { stmts, loc: token.loc }
 }
 
 /// parse an if statement
-fn if_stmt(parser: &mut Parser, token: Token) -> Stmt {
-    let cond = expr(parser, 0);
+fn if_stmt(parser: &mut Parser, token: &Token) -> Stmt {
+    let cond_token = parser.consume();
+    let cond = expr(parser, &cond_token, 0);
     let lbrace = parser.consume();
     if lbrace.kind != TokenKind::Lbrace {
         panic!("Expected {{ at {}", lbrace.loc);
     }
-    let then_block = Box::new(block_stmt(parser, lbrace));
+    let then_block = Box::new(block_stmt(parser, &lbrace));
     let else_block = if parser.peek().kind == TokenKind::Else {
         parser.consume();
         // check for an else if
@@ -368,7 +412,7 @@ fn if_stmt(parser: &mut Parser, token: Token) -> Stmt {
             // consume the if token
             let token = parser.consume();
             // recursively parse the if statement
-            let if_stmt = Box::new(if_stmt(parser, token));
+            let if_stmt = Box::new(if_stmt(parser, &token));
             Some(if_stmt)
         } else {
             // consume the lbrace
@@ -377,7 +421,7 @@ fn if_stmt(parser: &mut Parser, token: Token) -> Stmt {
                 panic!("Expected {{ at {}", lbrace.loc);
             }
             // parse the else block
-            let else_block = Box::new(block_stmt(parser, lbrace));
+            let else_block = Box::new(block_stmt(parser, &lbrace));
             Some(else_block)
         }
     } else {
@@ -445,7 +489,8 @@ fn parse_array_type(parser: &mut Parser, token: &Token) -> Type {
         panic!("Expected semicolon at {}", parser.peek().loc);
     }
     // parse the size
-    let size = expr(parser, 0);
+    let size_token = parser.consume();
+    let size = expr(parser, &size_token, 0);
 
     Type::Array(Box::new(elem_type), size, loc)
 }
@@ -598,7 +643,10 @@ fn parse_fn_def(parser: &mut Parser, token: &Token) -> FnDef {
         panic!("Expected -> at {}", parser.peek().loc);
     }
     let ret_ty = parse_type_annotation(parser);
-    let body = parse_block(parser, token);
+    if parser.peek().kind == TokenKind::Lbrace {
+        panic!("Expected body after -> at {}", parser.peek().loc);
+    }
+    let body = parse_block(parser);
     FnDef::new(name, generic_context, params, ret_ty, body, loc)
 }
 
@@ -794,7 +842,7 @@ fn parse_trait_fn(parser: &mut Parser, token: &Token) -> TraitFn {
     match parser.consume().kind {
         TokenKind::Semicolon => TraitFn::Required(RequiredFn { name, generics, params, ret_ty, loc }),
         TokenKind::Lbrace => {
-            let body = parse_block(parser, token);
+            let body = parse_block(parser);
             TraitFn::Given(GivenFn::new(name, generics, params, ret_ty, body, loc))
         }
         _ => panic!("Expected semicolon or {{ at {}", parser.peek().loc),

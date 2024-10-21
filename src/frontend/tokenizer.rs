@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::fmt::{self, Display};
 
 // TODO: rewrite tokenizer to remove indent/dedent tokens and switch to a c-style syntax
 
@@ -58,12 +58,66 @@ pub enum TokenKind {
     Trait,
     // special tokens
     Eof,
-    Indent,
-    Dedent,
-    Newline,
     // error
-    InvalidFloat,
     UnexpectedChar,
+}
+
+impl TokenKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Number => "Number",
+            Self::String => "String",
+            Self::Ident => "Identifier",
+            Self::True => "True",
+            Self::False => "False",
+            Self::Plus => "+",
+            Self::Minus => "-",
+            Self::Star => "*",
+            Self::Slash => "/",
+            Self::Percent => "%",
+            Self::Caret => "^",
+            Self::Lt => "<",
+            Self::Lte => "<=",
+            Self::LtLt => "<<",
+            Self::Gt => ">",
+            Self::Gte => ">=",
+            Self::GtGt => ">>",
+            Self::Eq => "=",
+            Self::EqEq => "==",
+            Self::Bang => "!",
+            Self::BangEq => "!=",
+            Self::Amper => "&",
+            Self::AmperAmper => "&&",
+            Self::Pipe => "|",
+            Self::PipePipe => "||",
+            Self::Lparen => "(",
+            Self::Rparen => ")",
+            Self::Lbrace => "{{",
+            Self::Rbrace => "}}",
+            Self::Lbracket => "[",
+            Self::Rbracket => "]",
+            Self::Comma => ",",
+            Self::Colon => ":",
+            Self::Semicolon => ";",
+            Self::Arrow => "->",
+            Self::FatArrow => "=>",
+            Self::Dot => ".",
+            Self::Fn => "fn",
+            Self::Let => "let",
+            Self::Const => "const",
+            Self::If => "if",
+            Self::Else => "else",
+            Self::Match => "match",
+            Self::Return => "return",
+            Self::Private => "private",
+            Self::Struct => "struct",
+            Self::Enum => "enum",
+            Self::Type => "type",
+            Self::Trait => "trait",
+            Self::Eof => "EOF",
+            Self::UnexpectedChar => "Error: Unexpected character",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -106,6 +160,11 @@ impl<'src> Token<'src> {
             lexeme: Some(lexeme),
             loc,
         }
+    }
+
+    /// returns either the lexeme or the tokenkind whatever will provide more information
+    pub fn error_data(&self) -> &str {
+        self.lexeme.unwrap_or(self.kind.as_str())
     }
 }
 
