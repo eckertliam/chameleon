@@ -1,6 +1,8 @@
+// TODO: replace all panic! with Results
+
 use std::collections::HashMap;
 
-use super::{tokenizer::{Token, TokenKind, Tokenizer}, BinOpKind, Expr, FnDef, GenericContext, GenericParam, Stmt, StructDef, StructField, Type, UnOpKind};
+use super::{tokenizer::{Token, TokenKind, Tokenizer}, BinOpKind, EnumDef, EnumVariant, Expr, FnDef, GenericContext, GenericParam, Stmt, StructDef, StructField, Type, UnOpKind};
 
 struct Parser<'src> {
     tokens: Vec<Token<'src>>,
@@ -600,29 +602,32 @@ fn parse_fn_def(parser: &mut Parser, token: &Token) -> FnDef {
     FnDef::new(name, generic_context, params, ret_ty, body, loc)
 }
 
-/// parse a struct definition
-fn parse_struct_def(parser: &mut Parser, token: &Token) -> StructDef {
-    let name = token.lexeme.expect(&format!("Expected lexeme for token: {:?} at {}", token.kind, token.loc)).to_string();
-    let loc = token.loc;
-    let generic_context = parse_generic_context(parser);
+/// parse a struct field
+fn parse_struct_field(parser: &mut Parser, token: &Token) -> StructField {
+    let is_private = matches!(parser.peek().kind, TokenKind::Private);
+    if is_private {
+        parser.consume();
+    }
+    let name = token.lexeme.expect(&format!("Expected a field name at {}", parser.peek().loc)).to_string();
+    // expect a :
+    if parser.consume().kind != TokenKind::Colon {
+        panic!("Expected : in struct field at {}", parser.peek().loc);
+    }
+    let ty = parse_type_annotation(parser);
+    StructField { is_private, name, ty, loc: token.loc }
+}
+
+/// parse a struct field list
+fn parse_struct_fields(parser: &mut Parser) -> Vec<StructField> {
     let mut fields = Vec::new();
     let mut comma = true;
     while parser.peek().kind != TokenKind::Rbrace && !parser.is_at_end() {
         if !comma {
             panic!("Expected comma at {} before next field", parser.peek().loc);
         }
-        let is_private = matches!(parser.peek().kind, TokenKind::Private);
-        if is_private {
-            parser.consume();
-        }
-        let token = parser.consume();
-        let loc = token.loc;
-        let field_name: String = token.lexeme.expect(&format!("Expected a field name at {}", parser.peek().loc)).to_string();
-        if parser.consume().kind != TokenKind::Colon {
-            panic!("Expected : at {}", parser.peek().loc);
-        }
-        let ty = parse_type_annotation(parser);
-        fields.push(StructField { is_private, name: field_name, ty, loc });
+        let field = parse_struct_field(parser, &parser.peek());
+        fields.push(field);
+        // expect a comma or a }
         if parser.peek().kind == TokenKind::Comma {
             parser.consume();
             comma = true;
@@ -634,9 +639,89 @@ fn parse_struct_def(parser: &mut Parser, token: &Token) -> StructDef {
     if parser.consume().kind != TokenKind::Rbrace {
         panic!("Expected }} at {}", parser.peek().loc);
     }
+    fields
+}
+
+/// parse a struct definition
+fn parse_struct_def(parser: &mut Parser, token: &Token) -> StructDef {
+    let name = token.lexeme.expect(&format!("Expected lexeme for token: {:?} at {}", token.kind, token.loc)).to_string();
+    let loc = token.loc;
+    let generic_context = parse_generic_context(parser);
+    let fields = parse_struct_fields(parser); 
     StructDef::new(name, generic_context, fields, loc)
 }
 
-// TODO: add parsing for enum definitions
-// TODO: add parsing for alias definitions
+/// parse an enum variant
+fn parse_enum_variant(parser: &mut Parser, token: &Token) -> EnumVariant {
+    let name = token.lexeme.expect(&format!("Expected lexeme for token: {:?} at {}", token.kind, token.loc)).to_string();
+    let loc = token.loc;
+    if parser.peek().kind == TokenKind::Lbrace {
+        // parse a struct variant
+        // consume the {
+        parser.consume();
+        // parse a struct variant
+        let fields = parse_struct_fields(parser);
+        EnumVariant::Struct { name, fields, loc }
+    } else if parser.peek().kind == TokenKind::Lparen {
+        // parse a tuple variant
+        // consume the (
+        parser.consume();
+        // simply parse a vec of type annotation until we hit a )
+        let mut values = Vec::new();
+        let mut comma = true;
+        while parser.peek().kind != TokenKind::Rparen && !parser.is_at_end() {
+            if !comma {
+                panic!("Expected comma at {} before next value", parser.peek().loc);
+            }
+            values.push(parse_type_annotation(parser));
+            if parser.peek().kind == TokenKind::Comma {
+                parser.consume();
+                comma = true;
+            } else {
+                comma = false;
+            }
+        }
+        // consume the )
+        if parser.consume().kind != TokenKind::Rparen {
+            panic!("Expected ) at {}", parser.peek().loc);
+        }
+        EnumVariant::Tuple { name, fields: values, loc }
+    } else {
+        // parse a symbol variant
+        EnumVariant::Symbol { name, loc }
+    }
+}
+
+/// parse an enum definition
+/// 
+/// panics if it doesn't close with a }
+fn parse_enum_def(parser: &mut Parser, token: &Token) -> EnumDef {
+    let name = token.lexeme.expect(&format!("Expected lexeme for token: {:?} at {}", token.kind, token.loc)).to_string();
+    let loc = token.loc;
+    let generics = parse_generic_context(parser);
+    if parser.consume().kind != TokenKind::Lbrace {
+        panic!("Expected {{ at {}", parser.peek().loc);
+    }
+    let mut variants = Vec::new();
+    let mut comma = true;
+    while parser.peek().kind != TokenKind::Rbrace && !parser.is_at_end() {
+        if !comma {
+            panic!("Expected comma at {} before next variant", parser.peek().loc);
+        }
+        variants.push(parse_enum_variant(parser, &parser.peek()));
+        if parser.peek().kind == TokenKind::Comma {
+            parser.consume();
+            comma = true;
+        } else {
+            comma = false;
+        }
+    }
+    // expect a }
+    if parser.consume().kind != TokenKind::Rbrace {
+        panic!("Expected }} at {}", parser.peek().loc);
+    }
+    
+    EnumDef { name, generics, variants, loc }
+}
+
 // TODO: add parsing for trait definitions
