@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use super::{tokenizer::{Token, TokenKind, Tokenizer}, BinOpKind, EnumDef, EnumVariant, Expr, FnDef, GenericContext, GenericParam, Stmt, StructDef, StructField, Type, UnOpKind};
+use super::{tokenizer::{Token, TokenKind, Tokenizer}, AliasDef, BinOpKind, EnumDef, EnumVariant, Expr, FnDef, GenericContext, GenericParam, Stmt, StructDef, StructField, Type, UnOpKind};
 
 struct Parser<'src> {
     tokens: Vec<Token<'src>>,
@@ -724,4 +724,23 @@ fn parse_enum_def(parser: &mut Parser, token: &Token) -> EnumDef {
     EnumDef { name, generics, variants, loc }
 }
 
-// TODO: add parsing for trait definitions
+/// parse an alias definition
+fn parse_alias_def(parser: &mut Parser, token: &Token) -> AliasDef {
+    let loc = token.loc;
+    let name = if let Token { kind: TokenKind::Ident, lexeme: Some(lexeme), .. } = parser.consume() {
+        lexeme.to_string()
+    } else {
+        panic!("Expected identifier at {}", token.loc);
+    };
+    let generics = parse_generic_context(parser);
+    if parser.consume().kind != TokenKind::Eq {
+        panic!("Expected = at {}", parser.peek().loc);
+    }
+    let ty = parse_type_annotation(parser);
+    if parser.consume().kind != TokenKind::Semicolon {
+        panic!("Expected semicolon at {}", parser.peek().loc);
+    }
+    AliasDef { name, generics, ty, loc }
+}
+
+// TODO: implement parsing for trait definitions
