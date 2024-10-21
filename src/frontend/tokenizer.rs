@@ -114,8 +114,6 @@ pub struct Tokenizer<'src> {
     start: usize,
     end: usize,
     loc: Loc,
-    /// Tracks the indentation level of the current line
-    indent_stack: Vec<usize>,
     tokens: Vec<Token<'src>>,
 }
 
@@ -126,7 +124,6 @@ impl<'src> Tokenizer<'src> {
             start: 0,
             end: 0,
             loc: Loc { line: 1, col: 1 },
-            indent_stack: vec![0],
             tokens: vec![],
         }
     }
@@ -135,39 +132,12 @@ impl<'src> Tokenizer<'src> {
         self.source.chars().nth(self.end)
     }
 
-    fn handle_newline(&mut self) {
-        self.simple_token(TokenKind::Newline);
-        let mut indent = 0;
-        while let Some(c) = self.peek_char() {
-            if c == ' ' {
-                indent += 1;
-                self.next_char();
-            } else {
-                break;
-            }
-        }
-        if indent > self.indent_stack.last().copied().unwrap() {
-            self.indent_stack.push(indent);
-            self.simple_token(TokenKind::Indent);
-        } else {
-            while let Some(&top) = self.indent_stack.last() {
-                if indent < top {
-                    self.indent_stack.pop();
-                    self.simple_token(TokenKind::Dedent);
-                } else {
-                    break;
-                }
-            }
-        }
-    }
-
     fn next_char(&mut self) -> Option<char> {
         let c = self.source.chars().nth(self.end);
         self.end += 1;
         if let Some('\n') = c {
             self.loc.line += 1;
             self.loc.col = 1;
-            self.handle_newline();
         } else {
             self.loc.col += 1;
         }
@@ -193,22 +163,22 @@ impl<'src> Tokenizer<'src> {
         self.simple_token(kind);
     }
 
-    fn skip_whitespace(&mut self) {
-        while let Some(c) = self.peek_char() {
-            if c.is_whitespace() {
-                self.next_char();
-            } else {
-                break;
-            }
-        }
-    }
-
     fn read_number(&mut self){
         while let Some(c) = self.peek_char() {
             if c.is_digit(10) {
                 self.next_char();
             } else {
                 break;
+            }
+        }
+        if self.peek_char() == Some('.') {
+            self.next_char();
+            while let Some(c) = self.peek_char() {
+                if c.is_digit(10) {
+                    self.next_char();
+                } else {
+                    break;
+                }
             }
         }
         self.token(TokenKind::Number);        
@@ -254,12 +224,10 @@ impl<'src> Tokenizer<'src> {
         while let Some(c) = self.peek_char() {
             self.start = self.end;
             match c {
-                '0'..='9' => self.read_number(),
-                ' ' => self.skip_whitespace(),
-                '\n' => {
-                    // next_char will handle the newline
+                c if c.is_whitespace() => {
                     self.next_char();
                 }
+                '0'..='9' => self.read_number(),
                 '+' => self.next_simple(TokenKind::Plus),
                 '-' => {
                     self.next_char();
@@ -354,10 +322,83 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_tokenize() {
-        let src = "fn main() -> int:\n    return 0;";
-        let mut tokenizer = Tokenizer::new(src);
+    fn test_simple_tokens() {
+        let input = "+-*/% ^ < <= << > >= >> = == ! != & && | || ( ) { } [ ] , : ; -> => .";
+        let mut tokenizer = Tokenizer::new(input);
         let tokens = tokenizer.tokenize();
-        println!("{:?}", tokens);
+        
+        let expected = vec![
+            TokenKind::Plus, TokenKind::Minus, TokenKind::Star, TokenKind::Slash, TokenKind::Percent,
+            TokenKind::Caret, TokenKind::Lt, TokenKind::Lte, TokenKind::LtLt, TokenKind::Gt, TokenKind::Gte,
+            TokenKind::GtGt, TokenKind::Eq, TokenKind::EqEq, TokenKind::Bang, TokenKind::BangEq,
+            TokenKind::Amper, TokenKind::AmperAmper, TokenKind::Pipe, TokenKind::PipePipe,
+            TokenKind::Lparen, TokenKind::Rparen, TokenKind::Lbrace, TokenKind::Rbrace,
+            TokenKind::Lbracket, TokenKind::Rbracket, TokenKind::Comma, TokenKind::Colon,
+            TokenKind::Semicolon, TokenKind::Arrow, TokenKind::FatArrow, TokenKind::Dot,
+            TokenKind::Eof
+        ];
+
+        assert_eq!(tokens.len(), expected.len());
+        for (token, expected_kind) in tokens.iter().zip(expected.iter()) {
+            assert_eq!(token.kind, *expected_kind);
+        }
+    }
+
+    #[test]
+    fn test_keywords() {
+        let input = "fn let const if else match return private struct enum type trait";
+        let mut tokenizer = Tokenizer::new(input);
+        let tokens = tokenizer.tokenize();
+        
+        let expected = vec![
+            TokenKind::Fn, TokenKind::Let, TokenKind::Const, TokenKind::If, TokenKind::Else,
+            TokenKind::Match, TokenKind::Return, TokenKind::Private, TokenKind::Struct,
+            TokenKind::Enum, TokenKind::Type, TokenKind::Trait, TokenKind::Eof
+        ];
+
+        assert_eq!(tokens.len(), expected.len());
+        for (token, expected_kind) in tokens.iter().zip(expected.iter()) {
+            assert_eq!(token.kind, *expected_kind);
+        }
+    }
+
+    #[test]
+    fn test_identifiers() {
+        let inputs = ["variable_name", "camelCase", "PascalCase", "SCREAMING_SNAKE", "_underscore"];
+        let acc = inputs.join(" ");
+        let mut tokenizer = Tokenizer::new(&acc);
+        let tokens = tokenizer.tokenize();
+        assert_eq!(tokens.len(), inputs.len() + 1);
+        for (token, expected) in tokens.iter().zip(inputs.iter()) {
+            assert_eq!(token.kind, TokenKind::Ident);
+            assert_eq!(token.lexeme.unwrap(), *expected);
+        }
+        assert_eq!(tokens.last().unwrap().kind, TokenKind::Eof);
+    }
+
+    #[test]
+    fn test_numbers() {
+        let inputs = ["123", "0", "42", "45.67", "0.1"];
+        let acc = inputs.join(" ");
+        let mut tokenizer = Tokenizer::new(&acc);
+        let tokens = tokenizer.tokenize();
+        assert_eq!(tokens.len(), inputs.len() + 1);
+        for (token, expected) in tokens.iter().zip(inputs.iter()) {
+            assert_eq!(token.kind, TokenKind::Number);
+            assert_eq!(token.lexeme.unwrap(), *expected);
+        }
+        assert_eq!(tokens.last().unwrap().kind, TokenKind::Eof);
+    }
+
+    #[test]
+    fn test_boolean_literals() {
+        let input = "true false";
+        let mut tokenizer = Tokenizer::new(input);
+        let tokens = tokenizer.tokenize();
+        
+        assert_eq!(tokens.len(), 3);
+        assert_eq!(tokens[0].kind, TokenKind::True);
+        assert_eq!(tokens[1].kind, TokenKind::False);
+        assert_eq!(tokens[2].kind, TokenKind::Eof);
     }
 }
