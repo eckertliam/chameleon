@@ -163,8 +163,8 @@ impl<'src> Token<'src> {
     }
 
     /// returns either the lexeme or the tokenkind whatever will provide more information
-    pub fn error_data(&self) -> &str {
-        self.lexeme.unwrap_or(self.kind.as_str())
+    pub fn error_data(&self) -> String {
+        self.lexeme.unwrap_or(self.kind.as_str()).to_string()
     }
 }
 

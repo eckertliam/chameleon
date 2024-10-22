@@ -1,34 +1,41 @@
-// TODO: replace all panic! with Results
+use std::fmt;
 
-use std::{collections::HashMap, fmt::{self, Display}};
+use super::{ast::*, tokenizer::{Token, TokenKind}, Loc};
 
-use super::{ast::*, tokenizer::{Token, TokenKind, Tokenizer}, Loc};
-
-#[derive(Debug)]
-enum ParserError<'src> {
+#[derive(Debug, Clone)]
+enum ParserError {
     UnexpectedToken {
-        token: Token<'src>,
+        at: Loc,
+        data: String,
     },
     ExpectedToken {
         expected: TokenKind,
-        got: Token<'src>,
+        at: Loc,
+        data: String,
     },
     UnexpectedEOF {
-        loc: Loc,
+        at: Loc,
     },
+    ExpectedValidNumber {
+        at: Loc,
+        data: String,
+    },
+    GenericParamError(String),
 }
 
-impl<'src> fmt::Display for ParserError<'src> {
+impl fmt::Display for ParserError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::UnexpectedToken { token } => write!(f, "Unexpected token: {} at {}", token.error_data(), token.loc),
-            Self::ExpectedToken { expected, got } => write!(f, "Expected {} at {} but got {}", expected.as_str(), got.loc, got.error_data()),
-            Self::UnexpectedEOF { loc } => write!(f, "Unexpected EOF at {}", loc),
+            Self::UnexpectedToken { at, data } => write!(f, "Unexpected token: {} at {}", data, at),
+            Self::ExpectedToken { expected, at, data } => write!(f, "Expected {} at {} but got {}", expected.as_str(), at, data),
+            Self::UnexpectedEOF { at } => write!(f, "Unexpected EOF at {}", at),
+            Self::ExpectedValidNumber { at, data } => write!(f, "Expected a valid number at {} but got {}", at, data),
+            Self::GenericParamError(e) => write!(f, "{}", e),
         }
     }
 }
 
-impl<'src> std::error::Error for ParserError<'src> {}
+impl std::error::Error for ParserError {}
 
 struct Parser<'src> {
     tokens: Vec<Token<'src>>,
@@ -58,59 +65,72 @@ impl<'src> Parser<'src> {
     }
 }
 
+fn expect_lexeme<'src>(token: &Token<'src>) -> Result<String, ParserError> {
+    token.lexeme
+        .map(|lexeme| lexeme.to_string())
+        .ok_or(ParserError::UnexpectedToken { at: token.loc, data: token.error_data() })
+}
+
 // Expression parsing
 // The expression parser is a simple Pratt parser 
 // Inspired by https://journal.stuffwithstuff.com/2011/03/19/pratt-parsers-expression-parsing-made-easy/
 
 /// parse an expression with a given precedence
-fn expr(parser: &mut Parser, token: &Token, precedence: u8) -> Expr {
-    let mut lhs = prefix(parser, &token);
+fn expr<'src>(parser: &mut Parser<'src>, token: &Token<'src>, precedence: u8) -> Result<Expr, ParserError> {
+    let mut lhs = match prefix(parser, token) {
+        Ok(expr) => expr,
+        Err(e) => return Err(e),
+    };
 
     while get_prec(parser.peek().kind) > precedence {
-        let token = parser.consume();
-        lhs = infix(parser, lhs, &token);
+        let infix_token = parser.consume();
+        lhs = match infix(parser, lhs, &infix_token) {
+            Ok(expr) => expr,
+            Err(e) => return Err(e),
+        };
     }
 
-    lhs
+    Ok(lhs)
 }
 
-fn prefix(parser: &mut Parser, token: &Token) -> Expr {
+fn prefix<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<Expr, ParserError> {
     match token.kind {
         TokenKind::Ident => ident(parser, token),
         TokenKind::Number => number(parser, token),
         TokenKind::String => string(parser, token),
-        TokenKind::True => Expr::Bool {
+        TokenKind::True => Ok(Expr::Bool {
             value: true,
             loc: token.loc,
-        },
-        TokenKind::False => Expr::Bool {
+        }),
+        TokenKind::False => Ok(Expr::Bool {
             value: false,
             loc: token.loc,
-        },
+        }),
         TokenKind::Lbracket => array(parser, token),
         TokenKind::Minus => prefix_minus(parser, token),
         TokenKind::Bang => prefix_bang(parser, token),
         TokenKind::Lbrace => block_expr(parser, token),
-        _ => panic!("Unexpected token: {:?} at {}", token.kind, token.loc),
+        _ => Err(ParserError::UnexpectedToken { at: token.loc, data: token.error_data() }),
     }
 }
 
 /// parse an identifier
-fn ident(parser: &mut Parser, token: &Token) -> Expr {
-    let name = token.lexeme.expect(&format!("Expected lexeme for token: {:?} at {}", token.kind, token.loc)).to_string();
-    Expr::Ident {
+fn ident<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<Expr, ParserError> {
+    let name = expect_lexeme(token)?;
+    Ok(Expr::Ident {
         name,
         loc: token.loc,
-    }
+    })
 }
 
 // parse an array
-fn array(parser: &mut Parser, token: &Token) -> Expr {
+fn array<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<Expr, ParserError> {
     let mut values = Vec::new();
     // track the last token consumed
     let mut arr_token = parser.consume();
     loop {
-        values.push(expr(parser, &arr_token, 0));
+        let expr = expr(parser, &arr_token, 0)?;
+        values.push(expr);
         arr_token = parser.consume();
         if arr_token.kind == TokenKind::Comma {
             arr_token = parser.consume();
@@ -120,59 +140,59 @@ fn array(parser: &mut Parser, token: &Token) -> Expr {
     }
     // ensure loop exited with a ]
     if arr_token.kind != TokenKind::Rbracket {
-        panic!("Expected ] at {}", arr_token.loc);
+        return Err(ParserError::UnexpectedToken { at: arr_token.loc, data: arr_token.error_data() });
     }
     let loc = token.loc;
-    Expr::Array {
+    Ok(Expr::Array {
         values,
         loc,
-    }
+    })
 }
 
-fn block_expr(parser: &mut Parser, token: &Token) -> Expr {
-    let stmts = parse_block(parser);
+fn block_expr<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<Expr, ParserError> {
+    let stmts = parse_block(parser)?;
     let loc = token.loc;
-    Expr::Block { stmts, loc }
+    Ok(Expr::Block { stmts, loc })
 }
 
 /// parse a number
 /// 
 /// returns an Int or Float depending on what can be parsed
-fn number(parser: &mut Parser, token: &Token) -> Expr {
-    let value = token.lexeme.expect(&format!("Expected lexeme for token: {:?} at {}", token.kind, token.loc)).to_string();
+fn number<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<Expr, ParserError> {
+    let value = expect_lexeme(token)?;
     if let Ok(int_value) = value.parse::<i64>() {
-        Expr::Int {
+        Ok(Expr::Int {
             value: int_value,
             loc: token.loc,
-        }
+        })
     } else if let Ok(float_value) = value.parse::<f64>() {
-        Expr::Float {
+        Ok(Expr::Float {
             value: float_value,
             loc: token.loc,
-        }
+        })
     } else {
-        panic!("Expected a number at {} got {}", token.loc, value);
+        Err(ParserError::ExpectedValidNumber { at: token.loc, data: token.error_data() })
     }
 }
 
-fn string(parser: &mut Parser, token: &Token) -> Expr {
-    let value = token.lexeme.expect(&format!("Expected lexeme for token: {:?} at {}", token.kind, token.loc)).to_string();
-    Expr::String {
+fn string<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<Expr, ParserError> {
+    let value = expect_lexeme(token)?;
+    Ok(Expr::String {
         value,
         loc: token.loc,
-    }
+    })
 }
 
 // utility macro for defining unary operators
 macro_rules! define_unary_op {
     ($func_id:ident, $op_kind:expr) => {
-        fn $func_id(parser: &mut Parser, token: &Token) -> Expr {
+        fn $func_id<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<Expr, ParserError> {
             let expr_token = parser.consume();
-            Expr::UnOp {
+            Ok(Expr::UnOp {
                 kind: $op_kind,
-                expr: Box::new(expr(parser, &expr_token, 0)),
+                expr: Box::new(expr(parser, &expr_token, 0)?),
                 loc: token.loc,
-            }
+            })
         }
     }
 }
@@ -183,7 +203,7 @@ define_unary_op!(prefix_not, UnOpKind::Not);
 
 
 /// parse an infix expression
-fn infix(parser: &mut Parser, lhs: Expr, token: &Token) -> Expr {
+fn infix<'src>(parser: &mut Parser<'src>, lhs: Expr, token: &Token<'src>) -> Result<Expr, ParserError> {
     match token.kind {
         TokenKind::Plus => infix_plus(parser, lhs, token),
         TokenKind::Minus => infix_minus(parser, lhs, token),
@@ -203,24 +223,24 @@ fn infix(parser: &mut Parser, lhs: Expr, token: &Token) -> Expr {
         TokenKind::Lte => infix_lte(parser, lhs, token),
         TokenKind::Gt => infix_gt(parser, lhs, token),
         TokenKind::Gte => infix_gte(parser, lhs, token),
-        TokenKind::Lparen => infix_call(parser, lhs, token),
-        TokenKind::Lbracket => infix_index(parser, lhs, token),
-        _ => panic!("Unexpected token: {:?} at {}", token.kind, token.loc),
+        TokenKind::Lparen => infix_call(parser, lhs),
+        TokenKind::Lbracket => infix_index(parser, lhs),
+        _ => Err(ParserError::UnexpectedToken { at: token.loc, data: token.error_data() }),
     }
 }
 
 macro_rules! define_binary_op {
     ($func_id:ident, $op_kind:expr) => {
-        fn $func_id(parser: &mut Parser, lhs: Expr, token: &Token) -> Expr {
+        fn $func_id<'src>(parser: &mut Parser<'src>, lhs: Expr, token: &Token<'src>) -> Result<Expr, ParserError> {
             let rhs_token = parser.consume();
             // pass the pass the operator precedence and parse the rhs 
-            let rhs = expr(parser, &rhs_token, get_prec(token.kind));
-            Expr::BinOp {
+            let rhs = expr(parser, &rhs_token, get_prec(token.kind))?;
+            Ok(Expr::BinOp {
                 kind: $op_kind,
                 lhs: Box::new(lhs),
                 rhs: Box::new(rhs),
                 loc: token.loc,
-            }
+            })
         }
     };
 }
@@ -245,12 +265,12 @@ define_binary_op!(infix_gt, BinOpKind::Gt);
 define_binary_op!(infix_gte, BinOpKind::Ge);
 
 /// parse a function call
-fn infix_call(parser: &mut Parser, lhs: Expr, token: &Token) -> Expr {
+fn infix_call<'src>(parser: &mut Parser<'src>, lhs: Expr) -> Result<Expr, ParserError> {
     // parse arguments
     let mut args = Vec::new();
     let mut infix_token = parser.consume();
     loop {
-        args.push(expr(parser, &infix_token, 0));
+        args.push(expr(parser, &infix_token, 0)?);
         infix_token = parser.consume();
         if infix_token.kind == TokenKind::Comma {
             infix_token = parser.consume();
@@ -260,31 +280,33 @@ fn infix_call(parser: &mut Parser, lhs: Expr, token: &Token) -> Expr {
     }
 
     // ensure loop exited with a )
-    if infix_token.kind != TokenKind::Rparen {
-        panic!("Expected ) at {}", infix_token.loc);
+    let rparen = parser.consume();
+    if rparen.kind != TokenKind::Rparen {
+        return Err(ParserError::ExpectedToken { expected: TokenKind::Rparen, at: rparen.loc, data: rparen.error_data() });
     }
 
     let loc = lhs.loc();
-    Expr::Call {
+    Ok(Expr::Call {
         callee: Box::new(lhs),
         args,
         loc,
-    }
+    })
 }
 
 /// parse an index
-fn infix_index(parser: &mut Parser, lhs: Expr, token: &Token) -> Expr {
+fn infix_index<'src>(parser: &mut Parser<'src>, lhs: Expr) -> Result<Expr, ParserError> {
     let index_token = parser.consume();
-    let index = expr(parser, &index_token, 0);
-    if parser.consume().kind != TokenKind::Rbracket {
-        panic!("Expected ] at {}", parser.peek().loc);
+    let index = expr(parser, &index_token, 0)?;
+    let close = parser.consume();
+    if close.kind != TokenKind::Rbracket {
+        return Err(ParserError::UnexpectedToken { at: close.loc, data: close.error_data() });
     }
     let loc = lhs.loc();
-    Expr::Index {
+    Ok(Expr::Index {
         array: Box::new(lhs),
         index: Box::new(index),
         loc,
-    }
+    })
 }
 
 /// returns the precedence of the operator
@@ -310,7 +332,7 @@ fn get_prec(kind: TokenKind) -> u8 {
 // Statements are parsed with simple recursive descent
 
 /// parse a top level statement
-fn stmt(parser: &mut Parser) -> Stmt {
+fn stmt<'src>(parser: &mut Parser<'src>) -> Result<Stmt, ParserError> {
     let token = parser.consume();
     match token.kind {
         TokenKind::Return => return_stmt(parser, &token),
@@ -318,93 +340,94 @@ fn stmt(parser: &mut Parser) -> Stmt {
         TokenKind::Const => var_decl(parser, &token, false),
         TokenKind::Lbrace => block_stmt(parser, &token),
         TokenKind::If => if_stmt(parser, &token),
-        _ => Stmt::Expr(expr(parser, &token, 0)),
+        _ => Ok(Stmt::Expr(expr(parser, &token, 0)?)),
     }
 }
 
 /// parse a return statement
-fn return_stmt(parser: &mut Parser, token: &Token) -> Stmt {
-    let expr = if parser.peek().kind != TokenKind::Semicolon {
-        Some(expr(parser, &token, 0))
+fn return_stmt<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<Stmt, ParserError> {
+    let expr_token = parser.consume();
+    let expr = if expr_token.kind != TokenKind::Semicolon {
+        Some(expr(parser, &expr_token, 0)?)
     } else {
         None
     };
-    // peek ahead semicolons are optional but if its there we consume it
-    if parser.peek().kind == TokenKind::Semicolon {
-        parser.consume();
-    }
 
-    Stmt::Return {
+    Ok(Stmt::Return {
         expr,
         loc: token.loc,
-    }
+    })
 }
 
 /// parse a variable declaration
-fn var_decl(parser: &mut Parser, token: &Token, mutable: bool) -> Stmt {
-    let name = if let Token { kind: TokenKind::Ident, lexeme: Some(lexeme), .. } = parser.consume() {
-        lexeme.to_string()
-    } else {
-        panic!("Expected identifier at {}", token.loc);
-    };
+fn var_decl<'src>(parser: &mut Parser<'src>, token: &Token<'src>, mutable: bool) -> Result<Stmt, ParserError> {
+    let loc = token.loc;
+    let name = expect_lexeme(&parser.consume())?;
 
     // TODO: add type annotation parsing
-    let ty = None;
+    let ty = if parser.peek().kind == TokenKind::Colon {
+        parser.consume();
+        Some(parse_type_annotation(parser)?)
+    } else {
+        None
+    };
 
     let value_token = parser.consume();
-    let value = expr(parser, &value_token, 0);
+    let value = expr(parser, &value_token, 0)?;
 
     // expect semicolon
-    if parser.consume().kind != TokenKind::Semicolon {
-        panic!("Expected semicolon at {}", parser.peek().loc);
+    let semicolon = parser.consume();
+    if semicolon.kind != TokenKind::Semicolon {
+        return Err(ParserError::ExpectedToken { expected: TokenKind::Semicolon, at: semicolon.loc, data: semicolon.error_data() });
     }
 
     if mutable {
-        Stmt::LetDef {
+        Ok(Stmt::LetDef {
             name,
             ty,
             value,
-            loc: token.loc,
-        }
+            loc,
+        })
     } else {
-        Stmt::ConstDef {
+        Ok(Stmt::ConstDef {
             name,
             ty,
             value,
-            loc: token.loc,
-        }
+            loc,
+        })
     }
 }
 
 /// parse a block
-fn parse_block(parser: &mut Parser) -> Vec<Stmt> {
+fn parse_block<'src>(parser: &mut Parser<'src>) -> Result<Vec<Stmt>, ParserError> {
     let mut stmts = Vec::new();
     while parser.peek().kind != TokenKind::Rbrace && !parser.is_at_end() {
-        stmts.push(stmt(parser));
+        stmts.push(stmt(parser)?);
     }
-    if parser.consume().kind != TokenKind::Rbrace {
-        panic!("Expected }} at {}", parser.peek().loc);
+    let rbrace = parser.consume();
+    if rbrace.kind != TokenKind::Rbrace {
+        return Err(ParserError::ExpectedToken { expected: TokenKind::Rbrace, at: rbrace.loc, data: rbrace.error_data() });
     }
-    stmts
+    Ok(stmts)
 }
 
 /// parse a block
 /// 
 /// where the token is the opening {
-fn block_stmt(parser: &mut Parser, token: &Token) -> Stmt {
-    let stmts = parse_block(parser);
-    Stmt::Block { stmts, loc: token.loc }
+fn block_stmt<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<Stmt, ParserError> {
+    let stmts = parse_block(parser)?;
+    Ok(Stmt::Block { stmts, loc: token.loc })
 }
 
 /// parse an if statement
-fn if_stmt(parser: &mut Parser, token: &Token) -> Stmt {
+fn if_stmt<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<Stmt, ParserError> {
     let cond_token = parser.consume();
-    let cond = expr(parser, &cond_token, 0);
+    let cond = expr(parser, &cond_token, 0)?;
     let lbrace = parser.consume();
     if lbrace.kind != TokenKind::Lbrace {
-        panic!("Expected {{ at {}", lbrace.loc);
+        return Err(ParserError::ExpectedToken { expected: TokenKind::Lbrace, at: lbrace.loc, data: lbrace.error_data() });
     }
-    let then_block = Box::new(block_stmt(parser, &lbrace));
+    let then_block = Box::new(block_stmt(parser, &lbrace)?);
     let else_block = if parser.peek().kind == TokenKind::Else {
         parser.consume();
         // check for an else if
@@ -412,27 +435,27 @@ fn if_stmt(parser: &mut Parser, token: &Token) -> Stmt {
             // consume the if token
             let token = parser.consume();
             // recursively parse the if statement
-            let if_stmt = Box::new(if_stmt(parser, &token));
+            let if_stmt = Box::new(if_stmt(parser, &token)?);
             Some(if_stmt)
         } else {
             // consume the lbrace
             let lbrace = parser.consume();
             if lbrace.kind != TokenKind::Lbrace {
-                panic!("Expected {{ at {}", lbrace.loc);
+                return Err(ParserError::ExpectedToken { expected: TokenKind::Lbrace, at: lbrace.loc, data: lbrace.error_data() });
             }
             // parse the else block
-            let else_block = Box::new(block_stmt(parser, &lbrace));
+            let else_block = Box::new(block_stmt(parser, &lbrace)?);
             Some(else_block)
         }
     } else {
         None
     };
-    Stmt::If {
+    Ok(Stmt::If {
         cond,
         then_block,
         else_block,
         loc: token.loc,
-    }
+    })
 }
 
 // type annotation parsing
@@ -440,23 +463,23 @@ fn if_stmt(parser: &mut Parser, token: &Token) -> Stmt {
 /// parse a type annotation
 /// 
 /// expects to start with TokenKind Ident, Lbracket, or Lparen
-/// will panic if it doesn't
-fn parse_type_annotation(parser: &mut Parser) -> Type {
+/// will return an error if it doesn't
+fn parse_type_annotation<'src>(parser: &mut Parser<'src>) -> Result<Type, ParserError> {
     let token = parser.consume();
     // will either start with TokenKind Ident, Lbracket, or Lparen
     match token.kind {
         TokenKind::Ident => {
-            let name = token.lexeme.expect(&format!("Expected lexeme for token: {:?} at {}", token.kind, token.loc)).to_string();
+            let name = expect_lexeme(&token)?;
             // check for generic args
             if parser.peek().kind == TokenKind::Lt {
                 // consume the <
                 let token = parser.consume();
-                let generic_args = parse_generic_args(parser);
-                return Type::Generic(name, generic_args, token.loc)
+                let generic_args = parse_generic_args(parser)?;
+                return Ok(Type::Generic(name, generic_args, token.loc))
             } 
             // match on the primitive type
             // otherwise it's an alias
-            match name.as_str() {
+            let ty =match name.as_str() {
                 "i8" => Type::I8(token.loc),
                 "i16" => Type::I16(token.loc),
                 "i32" => Type::I32(token.loc),
@@ -470,61 +493,64 @@ fn parse_type_annotation(parser: &mut Parser) -> Type {
                 "bool" => Type::Bool(token.loc),
                 "void" => Type::Void(token.loc),
                 _ => Type::Alias(name, token.loc),
-            }
+            };
+            Ok(ty)
         }
         TokenKind::Lbracket => parse_array_type(parser, &token),
         TokenKind::Lparen => parse_tuple_type(parser, &token),
-        _ => panic!("Expected identifier at {}", token.loc),
+        _ => Err(ParserError::UnexpectedToken { at: token.loc, data: token.error_data() }),
     }
 }
 
 /// parse an array type
 /// 
-/// panics if it doesn't close with a ]
-fn parse_array_type(parser: &mut Parser, token: &Token) -> Type {
+/// errors if it doesn't close with a ]
+fn parse_array_type<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<Type, ParserError> {
     let loc = token.loc;
-    let elem_type = parse_type_annotation(parser);
+    let elem_type = parse_type_annotation(parser)?;
     // expect a semicolon
-    if parser.consume().kind != TokenKind::Semicolon {
-        panic!("Expected semicolon at {}", parser.peek().loc);
+    let semicolon = parser.consume();
+    if semicolon.kind != TokenKind::Semicolon {
+        return Err(ParserError::ExpectedToken { expected: TokenKind::Semicolon, at: semicolon.loc, data: semicolon.error_data() })
     }
     // parse the size
     let size_token = parser.consume();
-    let size = expr(parser, &size_token, 0);
+    let size = expr(parser, &size_token, 0)?;
 
-    Type::Array(Box::new(elem_type), size, loc)
+    Ok(Type::Array(Box::new(elem_type), size, loc))
 }
 
 
 /// parse a tuple type
 /// 
-/// panics if it doesn't close with a )
-fn parse_tuple_type(parser: &mut Parser, token: &Token) -> Type {
+/// errors if it doesn't close with a )
+fn parse_tuple_type<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<Type, ParserError> {
     let loc = token.loc;
     let mut types = Vec::new();
     while parser.peek().kind != TokenKind::Rparen {
-        types.push(parse_type_annotation(parser));
+        types.push(parse_type_annotation(parser)?);
     }
-    if parser.consume().kind != TokenKind::Rparen {
-        panic!("Expected ) at {}", parser.peek().loc);
+    let rparen = parser.consume();
+    if rparen.kind != TokenKind::Rparen {
+        return Err(ParserError::ExpectedToken { expected: TokenKind::Rparen, at: rparen.loc, data: rparen.error_data() });
     }
-    Type::Tuple(types, loc)
+    Ok(Type::Tuple(types, loc))
 }
 
 /// parse a generic argument list
 /// 
-/// panics if it doesn't close with a >
-fn parse_generic_args(parser: &mut Parser) -> Vec<Type> {
+/// errors if it doesn't close with a >
+fn parse_generic_args<'src>(parser: &mut Parser<'src>) -> Result<Vec<Type>, ParserError> {
     let mut args = Vec::new();
     while parser.peek().kind != TokenKind::Gt {
-        args.push(parse_type_annotation(parser));
+        args.push(parse_type_annotation(parser)?);
     }
-    args
+    Ok(args)
 }
 
 /// parse a generic parameter
-fn parse_generic_param(parser: &mut Parser, token: &Token) -> GenericParam {
-    let name = parser.consume().lexeme.expect(&format!("Expected a generic parameter name at {}", token.loc)).to_string();
+fn parse_generic_param<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<GenericParam, ParserError> {
+    let name = expect_lexeme(&parser.consume())?;
     let mut bounds = Vec::new();
     if parser.peek().kind == TokenKind::Colon {
         let mut token =parser.consume();
@@ -533,13 +559,13 @@ fn parse_generic_param(parser: &mut Parser, token: &Token) -> GenericParam {
             // parse the bound
             match token.kind {
                 TokenKind::Ident => {
-                    bounds.push(token.lexeme.expect(&format!("Expected a trait bound at {}", token.loc)).to_string());
+                    bounds.push(expect_lexeme(&token)?);
                 }
-                _ => panic!("Expected trait bound at {}", token.loc),
+                _ => return Err(ParserError::UnexpectedToken { at: token.loc, data: token.error_data() }),
             }
 
             if parser.is_at_end() {
-                panic!("Unexpected EOF while parsing trait bound at {}", token.loc);
+                return Err(ParserError::UnexpectedEOF { at: token.loc });
             }
 
             token = parser.consume();
@@ -550,29 +576,27 @@ fn parse_generic_param(parser: &mut Parser, token: &Token) -> GenericParam {
                 // done parsing bounds
                 TokenKind::Comma => break,
                 // the only valid tokens are + and ,
-                _ => panic!("Expected + or , at {}", token.loc),
+                _ => return Err(ParserError::UnexpectedToken { at: token.loc, data: token.error_data() }),
             }
         }
     }
-    GenericParam { name, bounds, loc: token.loc }
+    Ok(GenericParam { name, bounds, loc: token.loc })
 }
 
 /// parse a generic context
-/// 
-/// panics if it doesn't close with a >
-fn parse_generic_context(parser: &mut Parser) -> GenericContext {
+fn parse_generic_context<'src>(parser: &mut Parser<'src>) -> Result<GenericContext, ParserError> {
     // consume the <
     parser.consume();
     let mut context = GenericContext::new();
     let mut token = parser.consume();
     loop {
-        match context.add_generic(parse_generic_param(parser, &token)) {
+        match context.add_generic(parse_generic_param(parser, &token)?) {
             Ok(_) => (),
-            Err(e) => panic!("{}", e),
+            Err(e) => return Err(ParserError::GenericParamError(e)),
         };
         
         if parser.is_at_end() {
-            panic!("Expected > at {}", token.loc);
+            return Err(ParserError::UnexpectedEOF { at: token.loc });
         }
 
         token = parser.consume();
@@ -589,29 +613,29 @@ fn parse_generic_context(parser: &mut Parser) -> GenericContext {
                 parser.consume();
                 break;
             }
-            _ => panic!("Expected , or > at {}", token.loc),
+            _ => return Err(ParserError::UnexpectedToken { at: token.loc, data: token.error_data() }),
         }
     }
-    context
+    Ok(context)
 }
 
 /// parse a function parameter list
-/// 
-/// panics if it doesn't close with a )
-fn parse_fn_params(parser: &mut Parser) -> Vec<(String, Type)> {
+fn parse_fn_params<'src>(parser: &mut Parser<'src>) -> Result<Vec<(String, Type)>, ParserError> {
     // expect a (
-    if parser.consume().kind != TokenKind::Lparen {
-        panic!("Expected ( at {}", parser.peek().loc);
+    let lparen = parser.consume();
+    if lparen.kind != TokenKind::Lparen {
+        return Err(ParserError::ExpectedToken { expected: TokenKind::Lparen, at: lparen.loc, data: lparen.error_data() });
     }
     let mut params = Vec::new();
     loop {
-        let name = parser.consume().lexeme.expect(&format!("Expected a parameter name at {}", parser.peek().loc)).to_string();
+        let name = expect_lexeme(&parser.consume())?;
         // expect a :
-        if parser.consume().kind != TokenKind::Colon {
-            panic!("Expected : at {}", parser.peek().loc);
+        let colon = parser.consume();
+        if colon.kind != TokenKind::Colon {
+            return Err(ParserError::ExpectedToken { expected: TokenKind::Colon, at: colon.loc, data: colon.error_data() });
         }
         // parse the type
-        let ty = parse_type_annotation(parser);
+        let ty = parse_type_annotation(parser)?;
         params.push((name, ty));
 
         if parser.peek().kind == TokenKind::Comma {
@@ -621,59 +645,61 @@ fn parse_fn_params(parser: &mut Parser) -> Vec<(String, Type)> {
         break;
     }
     // expect a )
-    let token = parser.consume();
-    if token.kind != TokenKind::Rparen {
-        panic!("Unclosed parameter list at {}", parser.peek().loc);
+    let rparen = parser.consume();
+    if rparen.kind != TokenKind::Rparen {
+        return Err(ParserError::ExpectedToken { expected: TokenKind::Rparen, at: rparen.loc, data: rparen.error_data() });
     }
-    params
+    Ok(params)
 }
 
 /// parse a function definition
-fn parse_fn_def(parser: &mut Parser, token: &Token) -> FnDef {
-    let name = token.lexeme.expect(&format!("Expected lexeme for token: {:?} at {}", token.kind, token.loc)).to_string();
+fn parse_fn_def<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<FnDef, ParserError> {
+    let name = expect_lexeme(&token)?;
     let loc = token.loc;
     // gives an empty generic context if there are no generics
     let generic_context = match parser.peek().kind {
-        TokenKind::Lt => parse_generic_context(parser),
+        TokenKind::Lt => parse_generic_context(parser)?,
         _ => GenericContext::new(),
     };
-    let params = parse_fn_params(parser);
+    let params = parse_fn_params(parser)?;
     // expect a ->
-    if parser.consume().kind != TokenKind::Arrow {
-        panic!("Expected -> at {}", parser.peek().loc);
+    let arrow = parser.consume();
+    if arrow.kind != TokenKind::Arrow {
+        return Err(ParserError::ExpectedToken { expected: TokenKind::Arrow, at: arrow.loc, data: arrow.error_data() });
     }
-    let ret_ty = parse_type_annotation(parser);
+    let ret_ty = parse_type_annotation(parser)?;
     if parser.peek().kind == TokenKind::Lbrace {
-        panic!("Expected body after -> at {}", parser.peek().loc);
+        return Err(ParserError::ExpectedToken { expected: TokenKind::Lbrace, at: parser.peek().loc, data: parser.peek().error_data() });
     }
-    let body = parse_block(parser);
-    FnDef::new(name, generic_context, params, ret_ty, body, loc)
+    let body = parse_block(parser)?;
+    Ok(FnDef::new(name, generic_context, params, ret_ty, body, loc))
 }
 
 /// parse a struct field
-fn parse_struct_field(parser: &mut Parser, token: &Token) -> StructField {
+fn parse_struct_field<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<StructField, ParserError> {
     let is_private = matches!(parser.peek().kind, TokenKind::Private);
     if is_private {
         parser.consume();
     }
-    let name = token.lexeme.expect(&format!("Expected a field name at {}", parser.peek().loc)).to_string();
+    let name = expect_lexeme(&token)?;
     // expect a :
-    if parser.consume().kind != TokenKind::Colon {
-        panic!("Expected : in struct field at {}", parser.peek().loc);
+    let colon = parser.consume();
+    if colon.kind != TokenKind::Colon {
+        return Err(ParserError::ExpectedToken { expected: TokenKind::Colon, at: colon.loc, data: colon.error_data() });
     }
-    let ty = parse_type_annotation(parser);
-    StructField { is_private, name, ty, loc: token.loc }
+    let ty = parse_type_annotation(parser)?;
+    Ok(StructField { is_private, name, ty, loc: token.loc })
 }
 
 /// parse a struct field list
-fn parse_struct_fields(parser: &mut Parser) -> Vec<StructField> {
+fn parse_struct_fields<'src>(parser: &mut Parser<'src>) -> Result<Vec<StructField>, ParserError> {
     let mut fields = Vec::new();
     let mut comma = true;
     while parser.peek().kind != TokenKind::Rbrace && !parser.is_at_end() {
         if !comma {
-            panic!("Expected comma at {} before next field", parser.peek().loc);
+            return Err(ParserError::ExpectedToken { expected: TokenKind::Comma, at: parser.peek().loc, data: parser.peek().error_data() });
         }
-        let field = parse_struct_field(parser, &parser.peek());
+        let field = parse_struct_field(parser, &parser.peek())?;
         fields.push(field);
         // expect a comma or a }
         if parser.peek().kind == TokenKind::Comma {
@@ -684,19 +710,23 @@ fn parse_struct_fields(parser: &mut Parser) -> Vec<StructField> {
         }
     }
     // expect a }
-    if parser.consume().kind != TokenKind::Rbrace {
-        panic!("Expected }} at {}", parser.peek().loc);
+    let rbrace = parser.consume();
+    if rbrace.kind != TokenKind::Rbrace {
+        return Err(ParserError::ExpectedToken { expected: TokenKind::Rbrace, at: rbrace.loc, data: rbrace.error_data() });
     }
-    fields
+    Ok(fields)
 }
 
 /// parse a struct definition
-fn parse_struct_def(parser: &mut Parser, token: &Token) -> StructDef {
-    let name = token.lexeme.expect(&format!("Expected lexeme for token: {:?} at {}", token.kind, token.loc)).to_string();
+fn parse_struct_def<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<StructDef, ParserError> {
+    let name = expect_lexeme(&token)?;
     let loc = token.loc;
-    let generic_context = parse_generic_context(parser);
-    let fields = parse_struct_fields(parser); 
-    StructDef::new(name, generic_context, fields, loc)
+    let generic_context = match parser.peek().kind {
+        TokenKind::Lt => parse_generic_context(parser)?,
+        _ => GenericContext::new(),
+    };
+    let fields = parse_struct_fields(parser)?; 
+    Ok(StructDef::new(name, generic_context, fields, loc))
 }
 
 /// parse an enum variant
@@ -712,16 +742,16 @@ fn parse_struct_def(parser: &mut Parser, token: &Token) -> StructDef {
 ///     Move(i32, i32),
 /// }
 /// ```
-fn parse_enum_variant(parser: &mut Parser, token: &Token) -> EnumVariant {
-    let name = token.lexeme.expect(&format!("Expected lexeme for token: {:?} at {}", token.kind, token.loc)).to_string();
+fn parse_enum_variant<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<EnumVariant, ParserError> {
+    let name = expect_lexeme(&token)?;
     let loc = token.loc;
     if parser.peek().kind == TokenKind::Lbrace {
         // parse a struct variant
         // consume the {
         parser.consume();
         // parse a struct variant
-        let fields = parse_struct_fields(parser);
-        EnumVariant::Struct { name, fields, loc }
+        let fields = parse_struct_fields(parser)?;
+        Ok(EnumVariant::Struct { name, fields, loc })
     } else if parser.peek().kind == TokenKind::Lparen {
         // parse a tuple variant
         // consume the (
@@ -731,9 +761,9 @@ fn parse_enum_variant(parser: &mut Parser, token: &Token) -> EnumVariant {
         let mut comma = true;
         while parser.peek().kind != TokenKind::Rparen && !parser.is_at_end() {
             if !comma {
-                panic!("Expected comma at {} before next value", parser.peek().loc);
+                return Err(ParserError::ExpectedToken { expected: TokenKind::Comma, at: parser.peek().loc, data: parser.peek().error_data() });
             }
-            values.push(parse_type_annotation(parser));
+            values.push(parse_type_annotation(parser)?);
             if parser.peek().kind == TokenKind::Comma {
                 parser.consume();
                 comma = true;
@@ -743,18 +773,16 @@ fn parse_enum_variant(parser: &mut Parser, token: &Token) -> EnumVariant {
         }
         // consume the )
         if parser.consume().kind != TokenKind::Rparen {
-            panic!("Expected ) at {}", parser.peek().loc);
+            return Err(ParserError::ExpectedToken { expected: TokenKind::Rparen, at: parser.peek().loc, data: parser.peek().error_data() });
         }
-        EnumVariant::Tuple { name, fields: values, loc }
+        Ok(EnumVariant::Tuple { name, fields: values, loc })
     } else {
         // parse a unit variant
-        EnumVariant::Unit { name, loc }
+        Ok(EnumVariant::Unit { name, loc })
     }
 }
 
 /// parse an enum definition
-/// 
-/// panics if it doesn't close with a }
 /// 
 /// example of expected input:
 /// ```
@@ -764,20 +792,24 @@ fn parse_enum_variant(parser: &mut Parser, token: &Token) -> EnumVariant {
 ///     Move(i32, i32),
 /// }
 /// ```
-fn parse_enum_def(parser: &mut Parser, token: &Token) -> EnumDef {
-    let name = token.lexeme.expect(&format!("Expected lexeme for token: {:?} at {}", token.kind, token.loc)).to_string();
+fn parse_enum_def<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<EnumDef, ParserError> {
+    let name = expect_lexeme(&token)?;
     let loc = token.loc;
-    let generics = parse_generic_context(parser);
-    if parser.consume().kind != TokenKind::Lbrace {
-        panic!("Expected {{ at {}", parser.peek().loc);
+    let generics = match parser.peek().kind {
+        TokenKind::Lt => parse_generic_context(parser)?,
+        _ => GenericContext::new(),
+    };
+    let lbrace = parser.consume();
+    if lbrace.kind != TokenKind::Lbrace {
+        return Err(ParserError::ExpectedToken { expected: TokenKind::Lbrace, at: lbrace.loc, data: lbrace.error_data() });
     }
     let mut variants = Vec::new();
     let mut comma = true;
     while parser.peek().kind != TokenKind::Rbrace && !parser.is_at_end() {
         if !comma {
-            panic!("Expected comma at {} before next variant", parser.peek().loc);
+            return Err(ParserError::ExpectedToken { expected: TokenKind::Comma, at: parser.peek().loc, data: parser.peek().error_data() });
         }
-        variants.push(parse_enum_variant(parser, &parser.peek()));
+        variants.push(parse_enum_variant(parser, &parser.peek())?);
         if parser.peek().kind == TokenKind::Comma {
             parser.consume();
             comma = true;
@@ -786,11 +818,11 @@ fn parse_enum_def(parser: &mut Parser, token: &Token) -> EnumDef {
         }
     }
     // expect a }
-    if parser.consume().kind != TokenKind::Rbrace {
-        panic!("Expected }} at {}", parser.peek().loc);
+    let rbrace = parser.consume();
+    if rbrace.kind != TokenKind::Rbrace {
+        return Err(ParserError::ExpectedToken { expected: TokenKind::Rbrace, at: rbrace.loc, data: rbrace.error_data() });
     }
-    
-    EnumDef { name, generics, variants, loc }
+    Ok(EnumDef { name, generics, variants, loc })
 }
 
 /// parse an alias definition
@@ -800,22 +832,25 @@ fn parse_enum_def(parser: &mut Parser, token: &Token) -> EnumDef {
 /// type Number = i64;
 /// type Point<T> = (T, T);
 /// ```
-fn parse_alias_def(parser: &mut Parser, token: &Token) -> AliasDef {
+fn parse_alias_def<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<AliasDef, ParserError> {
     let loc = token.loc;
-    let name = if let Token { kind: TokenKind::Ident, lexeme: Some(lexeme), .. } = parser.consume() {
-        lexeme.to_string()
-    } else {
-        panic!("Expected identifier at {}", token.loc);
+    let name = expect_lexeme(&parser.consume())?;
+    let generics = match parser.peek().kind {
+        TokenKind::Lt => parse_generic_context(parser)?,
+        _ => GenericContext::new(),
     };
-    let generics = parse_generic_context(parser);
-    if parser.consume().kind != TokenKind::Eq {
-        panic!("Expected = at {}", parser.peek().loc);
+    // expect a =
+    let eq = parser.consume();
+    if eq.kind != TokenKind::Eq {
+        return Err(ParserError::ExpectedToken { expected: TokenKind::Eq, at: eq.loc, data: eq.error_data() });
     }
-    let ty = parse_type_annotation(parser);
-    if parser.consume().kind != TokenKind::Semicolon {
-        panic!("Expected semicolon at {}", parser.peek().loc);
+    let ty = parse_type_annotation(parser)?;
+    // expect a semicolon
+    let semicolon = parser.consume();
+    if semicolon.kind != TokenKind::Semicolon {
+        return Err(ParserError::ExpectedToken { expected: TokenKind::Semicolon, at: semicolon.loc, data: semicolon.error_data() });
     }
-    AliasDef { name, generics, ty, loc }
+    Ok(AliasDef { name, generics, ty, loc })
 }
 
 /// parse a trait function
@@ -833,55 +868,70 @@ fn parse_alias_def(parser: &mut Parser, token: &Token) -> AliasDef {
 ///     }
 /// }
 /// ```
-fn parse_trait_fn(parser: &mut Parser, token: &Token) -> TraitFn {
-    let name = token.lexeme.expect(&format!("Expected lexeme for token: {:?} at {}", token.kind, token.loc)).to_string();
+fn parse_trait_fn<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<TraitFn, ParserError> {
+    let name = expect_lexeme(&token)?;
     let loc = token.loc;
-    let generics = parse_generic_context(parser);
-    let params = parse_fn_params(parser);
-    let ret_ty = parse_type_annotation(parser);
-    match parser.consume().kind {
-        TokenKind::Semicolon => TraitFn::Required(RequiredFn { name, generics, params, ret_ty, loc }),
+    let generics = match parser.peek().kind {
+        TokenKind::Lt => parse_generic_context(parser)?,
+        _ => GenericContext::new(),
+    };
+    let params = parse_fn_params(parser)?;
+    let ret_ty = parse_type_annotation(parser)?;
+    let next_token = parser.consume();
+    match next_token.kind {
+        TokenKind::Semicolon => Ok(TraitFn::Required(RequiredFn { name, generics, params, ret_ty, loc })),
         TokenKind::Lbrace => {
-            let body = parse_block(parser);
-            TraitFn::Given(GivenFn::new(name, generics, params, ret_ty, body, loc))
+            let body = parse_block(parser)?;
+            Ok(TraitFn::Given(GivenFn::new(name, generics, params, ret_ty, body, loc)))
         }
-        _ => panic!("Expected semicolon or {{ at {}", parser.peek().loc),
+        _ => Err(ParserError::UnexpectedToken { at: next_token.loc, data: next_token.error_data() }),
     }
 }
 
 /// parse a required trait field
-fn parse_required_trait_field(parser: &mut Parser, token: &Token) -> RequiredField {
-    let name = token.lexeme.expect(&format!("Expected lexeme for token: {:?} at {}", token.kind, token.loc)).to_string();
+fn parse_required_trait_field<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<RequiredField, ParserError> {
+    let name = expect_lexeme(&token)?;
     let loc = token.loc;
     // expect a :
-    if parser.consume().kind != TokenKind::Colon {
-        panic!("Expected : in required trait field at {}", parser.peek().loc);
+    let colon = parser.consume();
+    if colon.kind != TokenKind::Colon {
+        return Err(ParserError::ExpectedToken { expected: TokenKind::Colon, at: colon.loc, data: colon.error_data() });
     }
-    let ty = parse_type_annotation(parser);
+    let ty = parse_type_annotation(parser)?;
     // expect a semicolon
-    if parser.consume().kind != TokenKind::Semicolon {
-        panic!("Expected semicolon at {}", parser.peek().loc);
+    let semicolon = parser.consume();
+    if semicolon.kind != TokenKind::Semicolon {
+        return Err(ParserError::ExpectedToken { expected: TokenKind::Semicolon, at: semicolon.loc, data: semicolon.error_data() });
     }
-    RequiredField { name, ty, loc }
+    Ok(RequiredField { name, ty, loc })
 }
 
 /// parse a trait definition
-fn parse_trait_def(parser: &mut Parser, token: &Token) -> TraitDef {
-    let name = token.lexeme.expect(&format!("Expected lexeme for token: {:?} at {}", token.kind, token.loc)).to_string();
+fn parse_trait_def<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<TraitDef, ParserError> {
+    let name = expect_lexeme(&token)?;
     let loc = token.loc;
-    let generics = parse_generic_context(parser);
+    let generics = match parser.peek().kind {
+        TokenKind::Lt => parse_generic_context(parser)?,
+        _ => GenericContext::new(),
+    };
     let mut required_fns = Vec::new();
     let mut given_fns = Vec::new();
     let mut required_fields = Vec::new();
-    while parser.peek().kind != TokenKind::Rbrace && !parser.is_at_end() {
-        match parser.peek().kind {
-            TokenKind::Fn => match parse_trait_fn(parser, &parser.peek()) {
+    let mut next_token = parser.consume();
+    loop {
+        match next_token.kind {
+            TokenKind::Fn => match parse_trait_fn(parser, &next_token)? {
                 TraitFn::Required(required_fn) => required_fns.push(required_fn),
                 TraitFn::Given(given_fn) => given_fns.push(given_fn),
             }
-            TokenKind::Ident => required_fields.push(parse_required_trait_field(parser, &parser.peek())),
-            _ => panic!("Expected fn or identifier at {}", parser.peek().loc),
+            TokenKind::Ident => required_fields.push(parse_required_trait_field(parser, &next_token)?),
+            TokenKind::Rbrace => break,
+            _ => return Err(ParserError::UnexpectedToken { at: next_token.loc, data: next_token.error_data() }),
         }
+        next_token = parser.consume();
     }
-    TraitDef { name, generics, required_fns, given_fns, required_fields, loc }
+    if next_token.kind != TokenKind::Rbrace {
+        return Err(ParserError::ExpectedToken { expected: TokenKind::Rbrace, at: next_token.loc, data: next_token.error_data() });
+    }
+    Ok(TraitDef { name, generics, required_fns, given_fns, required_fields, loc })
 }
