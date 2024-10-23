@@ -65,10 +65,25 @@ impl<'src> Parser<'src> {
     }
 }
 
-fn expect_lexeme<'src>(token: &Token<'src>) -> Result<String, ParserError> {
-    token.lexeme
-        .map(|lexeme| lexeme.to_string())
-        .ok_or(ParserError::UnexpectedToken { at: token.loc, data: token.error_data() })
+
+fn unwrap_lexeme_with_kind<'src>(token: &Token<'src>, expected_kind: TokenKind) -> Result<String, ParserError> {
+    if let Token { kind, lexeme: Some(lexeme), .. } = token {
+        if *kind == expected_kind {
+            Ok(lexeme.to_string())
+        } else {
+            Err(ParserError::ExpectedToken { expected: expected_kind, at: token.loc, data: token.error_data() })
+        }
+    } else {
+        Err(ParserError::ExpectedToken { expected: expected_kind, at: token.loc, data: token.error_data() })
+    }
+}
+
+fn expect_token<'src>(parser: &mut Parser<'src>, kind: TokenKind) -> Result<Token<'src>, ParserError> {
+    let token = parser.consume();
+    if token.kind != kind {
+        return Err(ParserError::ExpectedToken { expected: kind, at: token.loc, data: token.error_data() });
+    }
+    Ok(token)
 }
 
 // Expression parsing
@@ -116,7 +131,7 @@ fn prefix<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<Expr, 
 
 /// parse an identifier
 fn ident<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<Expr, ParserError> {
-    let name = expect_lexeme(token)?;
+    let name = unwrap_lexeme_with_kind(token, TokenKind::Ident)?;
     Ok(Expr::Ident {
         name,
         loc: token.loc,
@@ -159,7 +174,7 @@ fn block_expr<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<Ex
 /// 
 /// returns an Int or Float depending on what can be parsed
 fn number<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<Expr, ParserError> {
-    let value = expect_lexeme(token)?;
+    let value = unwrap_lexeme_with_kind(token, TokenKind::Number)?;
     if let Ok(int_value) = value.parse::<i64>() {
         Ok(Expr::Int {
             value: int_value,
@@ -176,7 +191,7 @@ fn number<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<Expr, 
 }
 
 fn string<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<Expr, ParserError> {
-    let value = expect_lexeme(token)?;
+    let value = unwrap_lexeme_with_kind(token, TokenKind::String)?;
     Ok(Expr::String {
         value,
         loc: token.loc,
@@ -280,10 +295,7 @@ fn infix_call<'src>(parser: &mut Parser<'src>, lhs: Expr) -> Result<Expr, Parser
     }
 
     // ensure loop exited with a )
-    let rparen = parser.consume();
-    if rparen.kind != TokenKind::Rparen {
-        return Err(ParserError::ExpectedToken { expected: TokenKind::Rparen, at: rparen.loc, data: rparen.error_data() });
-    }
+    expect_token(parser, TokenKind::Rparen)?;
 
     let loc = lhs.loc();
     Ok(Expr::Call {
@@ -297,10 +309,7 @@ fn infix_call<'src>(parser: &mut Parser<'src>, lhs: Expr) -> Result<Expr, Parser
 fn infix_index<'src>(parser: &mut Parser<'src>, lhs: Expr) -> Result<Expr, ParserError> {
     let index_token = parser.consume();
     let index = expr(parser, &index_token, 0)?;
-    let close = parser.consume();
-    if close.kind != TokenKind::Rbracket {
-        return Err(ParserError::UnexpectedToken { at: close.loc, data: close.error_data() });
-    }
+    expect_token(parser, TokenKind::Rbracket)?;
     let loc = lhs.loc();
     Ok(Expr::Index {
         array: Box::new(lhs),
@@ -362,7 +371,7 @@ fn return_stmt<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<S
 /// parse a variable declaration
 fn var_decl<'src>(parser: &mut Parser<'src>, token: &Token<'src>, mutable: bool) -> Result<Stmt, ParserError> {
     let loc = token.loc;
-    let name = expect_lexeme(&parser.consume())?;
+    let name = unwrap_lexeme_with_kind(&parser.consume(), TokenKind::Ident)?;
 
     // TODO: add type annotation parsing
     let ty = if parser.peek().kind == TokenKind::Colon {
@@ -376,10 +385,7 @@ fn var_decl<'src>(parser: &mut Parser<'src>, token: &Token<'src>, mutable: bool)
     let value = expr(parser, &value_token, 0)?;
 
     // expect semicolon
-    let semicolon = parser.consume();
-    if semicolon.kind != TokenKind::Semicolon {
-        return Err(ParserError::ExpectedToken { expected: TokenKind::Semicolon, at: semicolon.loc, data: semicolon.error_data() });
-    }
+    expect_token(parser, TokenKind::Semicolon)?;
 
     if mutable {
         Ok(Stmt::LetDef {
@@ -404,10 +410,7 @@ fn parse_block<'src>(parser: &mut Parser<'src>) -> Result<Vec<Stmt>, ParserError
     while parser.peek().kind != TokenKind::Rbrace && !parser.is_at_end() {
         stmts.push(stmt(parser)?);
     }
-    let rbrace = parser.consume();
-    if rbrace.kind != TokenKind::Rbrace {
-        return Err(ParserError::ExpectedToken { expected: TokenKind::Rbrace, at: rbrace.loc, data: rbrace.error_data() });
-    }
+    expect_token(parser, TokenKind::Rbrace)?;
     Ok(stmts)
 }
 
@@ -438,7 +441,6 @@ fn if_stmt<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<Stmt,
             let if_stmt = Box::new(if_stmt(parser, &token)?);
             Some(if_stmt)
         } else {
-            // consume the lbrace
             let lbrace = parser.consume();
             if lbrace.kind != TokenKind::Lbrace {
                 return Err(ParserError::ExpectedToken { expected: TokenKind::Lbrace, at: lbrace.loc, data: lbrace.error_data() });
@@ -469,7 +471,7 @@ fn parse_type_annotation<'src>(parser: &mut Parser<'src>) -> Result<Type, Parser
     // will either start with TokenKind Ident, Lbracket, or Lparen
     match token.kind {
         TokenKind::Ident => {
-            let name = expect_lexeme(&token)?;
+            let name = unwrap_lexeme_with_kind(&token, TokenKind::Ident)?;
             // check for generic args
             if parser.peek().kind == TokenKind::Lt {
                 // consume the <
@@ -509,10 +511,7 @@ fn parse_array_type<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Res
     let loc = token.loc;
     let elem_type = parse_type_annotation(parser)?;
     // expect a semicolon
-    let semicolon = parser.consume();
-    if semicolon.kind != TokenKind::Semicolon {
-        return Err(ParserError::ExpectedToken { expected: TokenKind::Semicolon, at: semicolon.loc, data: semicolon.error_data() })
-    }
+    expect_token(parser, TokenKind::Semicolon)?;
     // parse the size
     let size_token = parser.consume();
     let size = expr(parser, &size_token, 0)?;
@@ -530,10 +529,7 @@ fn parse_tuple_type<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Res
     while parser.peek().kind != TokenKind::Rparen {
         types.push(parse_type_annotation(parser)?);
     }
-    let rparen = parser.consume();
-    if rparen.kind != TokenKind::Rparen {
-        return Err(ParserError::ExpectedToken { expected: TokenKind::Rparen, at: rparen.loc, data: rparen.error_data() });
-    }
+    expect_token(parser, TokenKind::Rparen)?;
     Ok(Type::Tuple(types, loc))
 }
 
@@ -550,7 +546,7 @@ fn parse_generic_args<'src>(parser: &mut Parser<'src>) -> Result<Vec<Type>, Pars
 
 /// parse a generic parameter
 fn parse_generic_param<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<GenericParam, ParserError> {
-    let name = expect_lexeme(&parser.consume())?;
+    let name = unwrap_lexeme_with_kind(&parser.consume(), TokenKind::Ident)?;
     let mut bounds = Vec::new();
     if parser.peek().kind == TokenKind::Colon {
         let mut token =parser.consume();
@@ -559,15 +555,10 @@ fn parse_generic_param<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> 
             // parse the bound
             match token.kind {
                 TokenKind::Ident => {
-                    bounds.push(expect_lexeme(&token)?);
+                    bounds.push(unwrap_lexeme_with_kind(&token, TokenKind::Ident)?);
                 }
                 _ => return Err(ParserError::UnexpectedToken { at: token.loc, data: token.error_data() }),
             }
-
-            if parser.is_at_end() {
-                return Err(ParserError::UnexpectedEOF { at: token.loc });
-            }
-
             token = parser.consume();
 
             match token.kind {
@@ -585,6 +576,9 @@ fn parse_generic_param<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> 
 
 /// parse a generic context
 fn parse_generic_context<'src>(parser: &mut Parser<'src>) -> Result<GenericContext, ParserError> {
+    if parser.peek().kind != TokenKind::Lt {
+        return Ok(GenericContext::new());
+    }
     // consume the <
     parser.consume();
     let mut context = GenericContext::new();
@@ -595,10 +589,6 @@ fn parse_generic_context<'src>(parser: &mut Parser<'src>) -> Result<GenericConte
             Err(e) => return Err(ParserError::GenericParamError(e)),
         };
         
-        if parser.is_at_end() {
-            return Err(ParserError::UnexpectedEOF { at: token.loc });
-        }
-
         token = parser.consume();
 
         match token.kind {
@@ -623,17 +613,12 @@ fn parse_generic_context<'src>(parser: &mut Parser<'src>) -> Result<GenericConte
 fn parse_fn_params<'src>(parser: &mut Parser<'src>) -> Result<Vec<(String, Type)>, ParserError> {
     // expect a (
     let lparen = parser.consume();
-    if lparen.kind != TokenKind::Lparen {
-        return Err(ParserError::ExpectedToken { expected: TokenKind::Lparen, at: lparen.loc, data: lparen.error_data() });
-    }
+    expect_token(parser, TokenKind::Lparen)?;
     let mut params = Vec::new();
     loop {
-        let name = expect_lexeme(&parser.consume())?;
+        let name = unwrap_lexeme_with_kind(&parser.consume(), TokenKind::Ident)?;
         // expect a :
-        let colon = parser.consume();
-        if colon.kind != TokenKind::Colon {
-            return Err(ParserError::ExpectedToken { expected: TokenKind::Colon, at: colon.loc, data: colon.error_data() });
-        }
+        expect_token(parser, TokenKind::Colon)?;
         // parse the type
         let ty = parse_type_annotation(parser)?;
         params.push((name, ty));
@@ -645,32 +630,21 @@ fn parse_fn_params<'src>(parser: &mut Parser<'src>) -> Result<Vec<(String, Type)
         break;
     }
     // expect a )
-    let rparen = parser.consume();
-    if rparen.kind != TokenKind::Rparen {
-        return Err(ParserError::ExpectedToken { expected: TokenKind::Rparen, at: rparen.loc, data: rparen.error_data() });
-    }
+    expect_token(parser, TokenKind::Rparen)?;
     Ok(params)
 }
 
 /// parse a function definition
 fn parse_fn_def<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<FnDef, ParserError> {
-    let name = expect_lexeme(&token)?;
+    let name = unwrap_lexeme_with_kind(token, TokenKind::Ident)?;
     let loc = token.loc;
     // gives an empty generic context if there are no generics
-    let generic_context = match parser.peek().kind {
-        TokenKind::Lt => parse_generic_context(parser)?,
-        _ => GenericContext::new(),
-    };
+    let generic_context = parse_generic_context(parser)?;
     let params = parse_fn_params(parser)?;
     // expect a ->
-    let arrow = parser.consume();
-    if arrow.kind != TokenKind::Arrow {
-        return Err(ParserError::ExpectedToken { expected: TokenKind::Arrow, at: arrow.loc, data: arrow.error_data() });
-    }
+    expect_token(parser, TokenKind::Arrow)?;
     let ret_ty = parse_type_annotation(parser)?;
-    if parser.peek().kind == TokenKind::Lbrace {
-        return Err(ParserError::ExpectedToken { expected: TokenKind::Lbrace, at: parser.peek().loc, data: parser.peek().error_data() });
-    }
+    expect_token(parser, TokenKind::Lbrace)?;
     let body = parse_block(parser)?;
     Ok(FnDef::new(name, generic_context, params, ret_ty, body, loc))
 }
@@ -681,12 +655,9 @@ fn parse_struct_field<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> R
     if is_private {
         parser.consume();
     }
-    let name = expect_lexeme(&token)?;
+    let name = unwrap_lexeme_with_kind(token, TokenKind::Ident)?;
     // expect a :
-    let colon = parser.consume();
-    if colon.kind != TokenKind::Colon {
-        return Err(ParserError::ExpectedToken { expected: TokenKind::Colon, at: colon.loc, data: colon.error_data() });
-    }
+    expect_token(parser, TokenKind::Colon)?;
     let ty = parse_type_annotation(parser)?;
     Ok(StructField { is_private, name, ty, loc: token.loc })
 }
@@ -710,21 +681,15 @@ fn parse_struct_fields<'src>(parser: &mut Parser<'src>) -> Result<Vec<StructFiel
         }
     }
     // expect a }
-    let rbrace = parser.consume();
-    if rbrace.kind != TokenKind::Rbrace {
-        return Err(ParserError::ExpectedToken { expected: TokenKind::Rbrace, at: rbrace.loc, data: rbrace.error_data() });
-    }
+    expect_token(parser, TokenKind::Rbrace)?;
     Ok(fields)
 }
 
 /// parse a struct definition
 fn parse_struct_def<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<StructDef, ParserError> {
-    let name = expect_lexeme(&token)?;
+    let name = unwrap_lexeme_with_kind(token, TokenKind::Ident)?;
     let loc = token.loc;
-    let generic_context = match parser.peek().kind {
-        TokenKind::Lt => parse_generic_context(parser)?,
-        _ => GenericContext::new(),
-    };
+    let generic_context = parse_generic_context(parser)?;
     let fields = parse_struct_fields(parser)?; 
     Ok(StructDef::new(name, generic_context, fields, loc))
 }
@@ -743,7 +708,7 @@ fn parse_struct_def<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Res
 /// }
 /// ```
 fn parse_enum_variant<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<EnumVariant, ParserError> {
-    let name = expect_lexeme(&token)?;
+    let name = unwrap_lexeme_with_kind(token, TokenKind::Ident)?;
     let loc = token.loc;
     if parser.peek().kind == TokenKind::Lbrace {
         // parse a struct variant
@@ -772,9 +737,7 @@ fn parse_enum_variant<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> R
             }
         }
         // consume the )
-        if parser.consume().kind != TokenKind::Rparen {
-            return Err(ParserError::ExpectedToken { expected: TokenKind::Rparen, at: parser.peek().loc, data: parser.peek().error_data() });
-        }
+        expect_token(parser, TokenKind::Rparen)?;
         Ok(EnumVariant::Tuple { name, fields: values, loc })
     } else {
         // parse a unit variant
@@ -793,16 +756,10 @@ fn parse_enum_variant<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> R
 /// }
 /// ```
 fn parse_enum_def<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<EnumDef, ParserError> {
-    let name = expect_lexeme(&token)?;
+    let name = unwrap_lexeme_with_kind(token, TokenKind::Ident)?;
     let loc = token.loc;
-    let generics = match parser.peek().kind {
-        TokenKind::Lt => parse_generic_context(parser)?,
-        _ => GenericContext::new(),
-    };
-    let lbrace = parser.consume();
-    if lbrace.kind != TokenKind::Lbrace {
-        return Err(ParserError::ExpectedToken { expected: TokenKind::Lbrace, at: lbrace.loc, data: lbrace.error_data() });
-    }
+    let generics = parse_generic_context(parser)?;
+    expect_token(parser, TokenKind::Lbrace)?;
     let mut variants = Vec::new();
     let mut comma = true;
     while parser.peek().kind != TokenKind::Rbrace && !parser.is_at_end() {
@@ -818,10 +775,7 @@ fn parse_enum_def<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Resul
         }
     }
     // expect a }
-    let rbrace = parser.consume();
-    if rbrace.kind != TokenKind::Rbrace {
-        return Err(ParserError::ExpectedToken { expected: TokenKind::Rbrace, at: rbrace.loc, data: rbrace.error_data() });
-    }
+    expect_token(parser, TokenKind::Rbrace)?;
     Ok(EnumDef { name, generics, variants, loc })
 }
 
@@ -834,22 +788,13 @@ fn parse_enum_def<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Resul
 /// ```
 fn parse_alias_def<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<AliasDef, ParserError> {
     let loc = token.loc;
-    let name = expect_lexeme(&parser.consume())?;
-    let generics = match parser.peek().kind {
-        TokenKind::Lt => parse_generic_context(parser)?,
-        _ => GenericContext::new(),
-    };
+    let name = unwrap_lexeme_with_kind(&parser.consume(), TokenKind::Ident)?;
+    let generics = parse_generic_context(parser)?;
     // expect a =
-    let eq = parser.consume();
-    if eq.kind != TokenKind::Eq {
-        return Err(ParserError::ExpectedToken { expected: TokenKind::Eq, at: eq.loc, data: eq.error_data() });
-    }
+    expect_token(parser, TokenKind::Eq)?;
     let ty = parse_type_annotation(parser)?;
     // expect a semicolon
-    let semicolon = parser.consume();
-    if semicolon.kind != TokenKind::Semicolon {
-        return Err(ParserError::ExpectedToken { expected: TokenKind::Semicolon, at: semicolon.loc, data: semicolon.error_data() });
-    }
+    expect_token(parser, TokenKind::Semicolon)?;
     Ok(AliasDef { name, generics, ty, loc })
 }
 
@@ -869,12 +814,9 @@ fn parse_alias_def<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Resu
 /// }
 /// ```
 fn parse_trait_fn<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<TraitFn, ParserError> {
-    let name = expect_lexeme(&token)?;
+    let name = unwrap_lexeme_with_kind(token, TokenKind::Ident)?;
     let loc = token.loc;
-    let generics = match parser.peek().kind {
-        TokenKind::Lt => parse_generic_context(parser)?,
-        _ => GenericContext::new(),
-    };
+    let generics = parse_generic_context(parser)?;
     let params = parse_fn_params(parser)?;
     let ret_ty = parse_type_annotation(parser)?;
     let next_token = parser.consume();
@@ -890,30 +832,21 @@ fn parse_trait_fn<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Resul
 
 /// parse a required trait field
 fn parse_required_trait_field<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<RequiredField, ParserError> {
-    let name = expect_lexeme(&token)?;
+    let name = unwrap_lexeme_with_kind(token, TokenKind::Ident)?;
     let loc = token.loc;
     // expect a :
-    let colon = parser.consume();
-    if colon.kind != TokenKind::Colon {
-        return Err(ParserError::ExpectedToken { expected: TokenKind::Colon, at: colon.loc, data: colon.error_data() });
-    }
+    expect_token(parser, TokenKind::Colon)?;
     let ty = parse_type_annotation(parser)?;
     // expect a semicolon
-    let semicolon = parser.consume();
-    if semicolon.kind != TokenKind::Semicolon {
-        return Err(ParserError::ExpectedToken { expected: TokenKind::Semicolon, at: semicolon.loc, data: semicolon.error_data() });
-    }
+    expect_token(parser, TokenKind::Semicolon)?;
     Ok(RequiredField { name, ty, loc })
 }
 
 /// parse a trait definition
 fn parse_trait_def<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<TraitDef, ParserError> {
-    let name = expect_lexeme(&token)?;
+    let name = unwrap_lexeme_with_kind(token, TokenKind::Ident)?;
     let loc = token.loc;
-    let generics = match parser.peek().kind {
-        TokenKind::Lt => parse_generic_context(parser)?,
-        _ => GenericContext::new(),
-    };
+    let generics = parse_generic_context(parser)?;
     let mut required_fns = Vec::new();
     let mut given_fns = Vec::new();
     let mut required_fields = Vec::new();
@@ -930,9 +863,7 @@ fn parse_trait_def<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Resu
         }
         next_token = parser.consume();
     }
-    if next_token.kind != TokenKind::Rbrace {
-        return Err(ParserError::ExpectedToken { expected: TokenKind::Rbrace, at: next_token.loc, data: next_token.error_data() });
-    }
+    expect_token(parser, TokenKind::Rbrace)?;
     Ok(TraitDef { name, generics, required_fns, given_fns, required_fields, loc })
 }
 
@@ -942,11 +873,7 @@ fn parse_impl_block<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Res
     // token is the impl keyword
     let loc = token.loc;
     // check if there are generics
-    // TODO: move this match to the generic context parsing
-    let generics = match parser.peek().kind {
-        TokenKind::Lt => parse_generic_context(parser)?,
-        _ => GenericContext::new(),
-    };
+    let generics = parse_generic_context(parser)?;
     let mut trait_ = None;
     // expect a trait or a struct
     let ty = parse_type_annotation(parser)?;
@@ -959,11 +886,7 @@ fn parse_impl_block<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Res
     } else {
         ty
     };
-    // expect a lbrace
-    let lbrace = parser.consume();
-    if lbrace.kind != TokenKind::Lbrace {
-        return Err(ParserError::ExpectedToken { expected: TokenKind::Lbrace, at: lbrace.loc, data: lbrace.error_data() });
-    }
+    expect_token(parser, TokenKind::Lbrace)?;
     let mut fns: Vec<FnDef> = Vec::new();
     let mut next_token = parser.consume();
     loop {
@@ -974,8 +897,6 @@ fn parse_impl_block<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Res
         }
         next_token = parser.consume();
     }
-    if next_token.kind != TokenKind::Rbrace {
-        return Err(ParserError::ExpectedToken { expected: TokenKind::Rbrace, at: next_token.loc, data: next_token.error_data() });
-    }
+    expect_token(parser, TokenKind::Rbrace)?;
     Ok(ImplBlock { trait_, generics, for_type, fns, loc })
 }
