@@ -718,9 +718,6 @@ fn parse_enum_variant<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> R
     let loc = token.loc;
     if parser.peek().kind == TokenKind::Lbrace {
         // parse a struct variant
-        // consume the {
-        parser.consume();
-        // parse a struct variant
         let fields = parse_struct_fields(parser)?;
         Ok(EnumVariant::Struct { name, fields, loc })
     } else if parser.peek().kind == TokenKind::Lparen {
@@ -772,7 +769,8 @@ fn parse_enum_def<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Resul
         if !comma {
             return Err(ParserError::ExpectedToken { expected: TokenKind::Comma, at: parser.peek().loc, data: parser.peek().error_data() });
         }
-        variants.push(parse_enum_variant(parser, &parser.peek())?);
+        let next_token = parser.consume();
+        variants.push(parse_enum_variant(parser, &next_token)?);
         if parser.peek().kind == TokenKind::Comma {
             parser.consume();
             comma = true;
@@ -1016,6 +1014,13 @@ mod tests {
     #[test]
     fn parse_struct_def() {
         let source = "struct Point { x: i32, y: i32 }";
+        let program = parse(source);
+        assert!(program.is_ok());
+    }
+
+    #[test]
+    fn parse_enum_def() {
+        let source = "enum Message { Quit, Write { text: String }, Move(i32, i32) }";
         let program = parse(source);
         assert!(program.is_ok());
     }
