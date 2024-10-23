@@ -1,15 +1,87 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, string::ParseError};
 use crate::frontend::Loc;
 
+use super::parser::ParserError;
+
 pub struct Program {
+    /// store the location of each definition in order to report duplicates
+    pub namespace: HashMap<String, Loc>,
     pub fn_defs: HashMap<String, FnDef>,
     pub struct_defs: HashMap<String, StructDef>,
     pub enum_defs: HashMap<String, EnumDef>,
     pub alias_defs: HashMap<String, AliasDef>,
     pub trait_defs: HashMap<String, TraitDef>,
+    pub impl_blocks: Vec<ImplBlock>,
 }
 
-#[derive(Debug, Clone)]
+impl Program {
+    pub fn new() -> Self {
+        Self {
+            namespace: HashMap::new(),
+            fn_defs: HashMap::new(),
+            struct_defs: HashMap::new(),
+            enum_defs: HashMap::new(),
+            alias_defs: HashMap::new(),
+            trait_defs: HashMap::new(),
+            impl_blocks: Vec::new(),
+        }
+    }
+
+    fn add_definition(&mut self, name: &str, loc: Loc) -> Result<(), ParserError> {
+        if let Some(existing) = self.namespace.get(name) {
+            return Err(ParserError::DuplicateDefinition { name: name.to_string(), original: *existing, new: loc });
+        }
+        self.namespace.insert(name.to_string(), loc);
+        Ok(())
+    }
+
+    pub fn add_fn_def(&mut self, fn_def: FnDef) -> Result<(), ParserError> {
+        self.add_definition(&fn_def.name, fn_def.loc)?;
+        self.fn_defs.insert(fn_def.name.clone(), fn_def);
+        Ok(())
+    }
+
+    pub fn add_struct_def(&mut self, struct_def: StructDef) -> Result<(), ParserError> {
+        self.add_definition(&struct_def.name, struct_def.loc)?;
+        self.struct_defs.insert(struct_def.name.clone(), struct_def);
+        Ok(())
+    }
+
+    pub fn add_enum_def(&mut self, enum_def: EnumDef) -> Result<(), ParserError> {
+        self.add_definition(&enum_def.name, enum_def.loc)?;
+        self.enum_defs.insert(enum_def.name.clone(), enum_def);
+        Ok(())
+    }
+
+    pub fn add_alias_def(&mut self, alias_def: AliasDef) -> Result<(), ParserError> {
+        self.add_definition(&alias_def.name, alias_def.loc)?;
+        self.alias_defs.insert(alias_def.name.clone(), alias_def);
+        Ok(())
+    }
+
+    pub fn add_trait_def(&mut self, trait_def: TraitDef) -> Result<(), ParserError> {
+        self.add_definition(&trait_def.name, trait_def.loc)?;
+        self.trait_defs.insert(trait_def.name.clone(), trait_def);
+        Ok(())
+    }
+
+    pub fn add_impl_block(&mut self, impl_block: ImplBlock) -> Result<(), ParserError> {
+        // make sure that no trait is implemented twice for the same type
+        if let Some(new_trait_) = &impl_block.trait_ {
+            for existing in self.impl_blocks.iter() {
+                if let Some(existing_trait_) = &existing.trait_ {
+                    if existing_trait_ == new_trait_ {
+                        return Err(ParserError::DuplicateDefinition { name: new_trait_.to_string(), original: existing.loc, new: impl_block.loc });
+                    }
+                }
+            }
+        }
+        self.impl_blocks.push(impl_block);
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Int {
         value: i64,
@@ -80,7 +152,7 @@ impl Expr {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum BinOpKind {
     Add,
     Sub,
@@ -102,13 +174,13 @@ pub enum BinOpKind {
     Ge,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum UnOpKind {
     Neg,
     Not,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
     Return {
         expr: Option<Expr>,
@@ -140,7 +212,7 @@ pub enum Stmt {
 }
 
 /// All type annotations
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Type {
     // Primitive types
     I8(Loc),
@@ -173,6 +245,29 @@ pub enum Type {
     /// let x: Vec<i64> = Vec::new();
     /// ```
     Generic(String, Vec<Type>, Loc),
+}
+
+impl ToString for Type {
+    fn to_string(&self) -> String {
+        match self {
+            Type::I8(_) => "i8".to_string(),
+            Type::I16(_) => "i16".to_string(),
+            Type::I32(_) => "i32".to_string(),
+            Type::I64(_) => "i64".to_string(),
+            Type::U8(_) => "u8".to_string(),
+            Type::U16(_) => "u16".to_string(),
+            Type::U32(_) => "u32".to_string(),
+            Type::U64(_) => "u64".to_string(),
+            Type::F32(_) => "f32".to_string(),
+            Type::F64(_) => "f64".to_string(),
+            Type::Bool(_) => "bool".to_string(),
+            Type::Void(_) => "void".to_string(),
+            Type::Tuple(tys, _) => format!("({})", tys.iter().map(|ty| ty.to_string()).collect::<Vec<String>>().join(", ")),
+            Type::Array(ty, size, _) => format!("Array<{}, {:?}>", ty.to_string(), size),
+            Type::Alias(name, _) => name.clone(),
+            Type::Generic(name, tys, _) => format!("{}<{}>", name, tys.iter().map(|ty| ty.to_string()).collect::<Vec<String>>().join(", ")),
+        }
+    }
 }
 
 /// A generic parameter

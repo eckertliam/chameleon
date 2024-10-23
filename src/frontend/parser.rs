@@ -1,9 +1,9 @@
 use std::fmt;
 
-use super::{ast::*, tokenizer::{Token, TokenKind}, Loc};
+use super::{ast::*, tokenizer::{Token, TokenKind}, Loc, Tokenizer};
 
 #[derive(Debug, Clone)]
-enum ParserError {
+pub enum ParserError {
     UnexpectedToken {
         at: Loc,
         data: String,
@@ -21,6 +21,11 @@ enum ParserError {
         data: String,
     },
     GenericParamError(String),
+    DuplicateDefinition {
+        name: String,
+        original: Loc,
+        new: Loc,
+    },
 }
 
 impl fmt::Display for ParserError {
@@ -31,6 +36,7 @@ impl fmt::Display for ParserError {
             Self::UnexpectedEOF { at } => write!(f, "Unexpected EOF at {}", at),
             Self::ExpectedValidNumber { at, data } => write!(f, "Expected a valid number at {} but got {}", at, data),
             Self::GenericParamError(e) => write!(f, "{}", e),
+            Self::DuplicateDefinition { name, original, new } => write!(f, "Duplicate definition: {} at {} and {}", name, original, new),
         }
     }
 }
@@ -38,12 +44,12 @@ impl fmt::Display for ParserError {
 impl std::error::Error for ParserError {}
 
 struct Parser<'src> {
-    tokens: Vec<Token<'src>>,
+    tokens: &'src Vec<Token<'src>>,
     pos: usize,
 }
 
 impl<'src> Parser<'src> {
-    pub fn new(tokens: Vec<Token<'src>>) -> Self {
+    pub fn new(tokens: &'src Vec<Token<'src>>) -> Self {
         Self {
             tokens,
             pos: 0,
@@ -61,11 +67,11 @@ impl<'src> Parser<'src> {
     }
 
     fn is_at_end(&self) -> bool {
-        self.pos >= self.tokens.len()
+        self.pos >= self.tokens.len() || self.peek().kind == TokenKind::Eof
     }
 }
 
-
+/// attempt to unwrap a token's lexeme with a given kind if it does not have a lexeme or is not the expected kind return an error
 fn unwrap_lexeme_with_kind<'src>(token: &Token<'src>, expected_kind: TokenKind) -> Result<String, ParserError> {
     if let Token { kind, lexeme: Some(lexeme), .. } = token {
         if *kind == expected_kind {
@@ -78,6 +84,7 @@ fn unwrap_lexeme_with_kind<'src>(token: &Token<'src>, expected_kind: TokenKind) 
     }
 }
 
+/// attempt to consume a token with a given kind, if it does not match the expected kind return an error
 fn expect_token<'src>(parser: &mut Parser<'src>, kind: TokenKind) -> Result<Token<'src>, ParserError> {
     let token = parser.consume();
     if token.kind != kind {
@@ -92,10 +99,7 @@ fn expect_token<'src>(parser: &mut Parser<'src>, kind: TokenKind) -> Result<Toke
 
 /// parse an expression with a given precedence
 fn expr<'src>(parser: &mut Parser<'src>, token: &Token<'src>, precedence: u8) -> Result<Expr, ParserError> {
-    let mut lhs = match prefix(parser, token) {
-        Ok(expr) => expr,
-        Err(e) => return Err(e),
-    };
+    let mut lhs = prefix(parser, token)?;
 
     while get_prec(parser.peek().kind) > precedence {
         let infix_token = parser.consume();
@@ -214,7 +218,6 @@ macro_rules! define_unary_op {
 
 define_unary_op!(prefix_minus, UnOpKind::Neg);
 define_unary_op!(prefix_bang, UnOpKind::Not);
-define_unary_op!(prefix_not, UnOpKind::Not);
 
 
 /// parse an infix expression
@@ -426,10 +429,7 @@ fn block_stmt<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<St
 fn if_stmt<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<Stmt, ParserError> {
     let cond_token = parser.consume();
     let cond = expr(parser, &cond_token, 0)?;
-    let lbrace = parser.consume();
-    if lbrace.kind != TokenKind::Lbrace {
-        return Err(ParserError::ExpectedToken { expected: TokenKind::Lbrace, at: lbrace.loc, data: lbrace.error_data() });
-    }
+    let lbrace = expect_token(parser, TokenKind::Lbrace)?;
     let then_block = Box::new(block_stmt(parser, &lbrace)?);
     let else_block = if parser.peek().kind == TokenKind::Else {
         parser.consume();
@@ -612,8 +612,12 @@ fn parse_generic_context<'src>(parser: &mut Parser<'src>) -> Result<GenericConte
 /// parse a function parameter list
 fn parse_fn_params<'src>(parser: &mut Parser<'src>) -> Result<Vec<(String, Type)>, ParserError> {
     // expect a (
-    let lparen = parser.consume();
     expect_token(parser, TokenKind::Lparen)?;
+    // handle the case where there are no parameters
+    if parser.peek().kind == TokenKind::Rparen {
+        parser.consume();
+        return Ok(Vec::new());
+    }
     let mut params = Vec::new();
     loop {
         let name = unwrap_lexeme_with_kind(&parser.consume(), TokenKind::Ident)?;
@@ -636,7 +640,7 @@ fn parse_fn_params<'src>(parser: &mut Parser<'src>) -> Result<Vec<(String, Type)
 
 /// parse a function definition
 fn parse_fn_def<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<FnDef, ParserError> {
-    let name = unwrap_lexeme_with_kind(token, TokenKind::Ident)?;
+    let name = unwrap_lexeme_with_kind(&parser.consume(), TokenKind::Ident)?;
     let loc = token.loc;
     // gives an empty generic context if there are no generics
     let generic_context = parse_generic_context(parser)?;
@@ -655,7 +659,7 @@ fn parse_struct_field<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> R
     if is_private {
         parser.consume();
     }
-    let name = unwrap_lexeme_with_kind(token, TokenKind::Ident)?;
+    let name = unwrap_lexeme_with_kind(&parser.consume(), TokenKind::Ident)?;
     // expect a :
     expect_token(parser, TokenKind::Colon)?;
     let ty = parse_type_annotation(parser)?;
@@ -664,6 +668,8 @@ fn parse_struct_field<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> R
 
 /// parse a struct field list
 fn parse_struct_fields<'src>(parser: &mut Parser<'src>) -> Result<Vec<StructField>, ParserError> {
+    // expect a {
+    expect_token(parser, TokenKind::Lbrace)?;
     let mut fields = Vec::new();
     let mut comma = true;
     while parser.peek().kind != TokenKind::Rbrace && !parser.is_at_end() {
@@ -687,7 +693,7 @@ fn parse_struct_fields<'src>(parser: &mut Parser<'src>) -> Result<Vec<StructFiel
 
 /// parse a struct definition
 fn parse_struct_def<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<StructDef, ParserError> {
-    let name = unwrap_lexeme_with_kind(token, TokenKind::Ident)?;
+    let name = unwrap_lexeme_with_kind(&parser.consume(), TokenKind::Ident)?;
     let loc = token.loc;
     let generic_context = parse_generic_context(parser)?;
     let fields = parse_struct_fields(parser)?; 
@@ -756,7 +762,7 @@ fn parse_enum_variant<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> R
 /// }
 /// ```
 fn parse_enum_def<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<EnumDef, ParserError> {
-    let name = unwrap_lexeme_with_kind(token, TokenKind::Ident)?;
+    let name = unwrap_lexeme_with_kind(&parser.consume(), TokenKind::Ident)?;
     let loc = token.loc;
     let generics = parse_generic_context(parser)?;
     expect_token(parser, TokenKind::Lbrace)?;
@@ -899,4 +905,118 @@ fn parse_impl_block<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Res
     }
     expect_token(parser, TokenKind::Rbrace)?;
     Ok(ImplBlock { trait_, generics, for_type, fns, loc })
+}
+
+/// consume tokens until next top level token
+fn consume_to_top_level<'src>(parser: &mut Parser<'src>) {
+    while !parser.is_at_end() {
+        let next_token = parser.peek();
+        if next_token.kind == TokenKind::Fn || next_token.kind == TokenKind::Struct || next_token.kind == TokenKind::Enum || next_token.kind == TokenKind::Type || next_token.kind == TokenKind::Trait || next_token.kind == TokenKind::Impl {
+            break;
+        } else {
+            parser.consume();
+        }
+    }
+}
+
+
+/// parse a program
+fn parse_program<'src>(parser: &mut Parser<'src>) -> Result<Program, Vec<ParserError>> {
+    let mut program = Program::new();
+    let mut errors = Vec::new();
+    while !parser.is_at_end() {
+        let next_token = parser.consume();
+        match next_token.kind {
+            TokenKind::Fn => match parse_fn_def(parser, &next_token) {
+                Ok(fn_def) => match program.add_fn_def(fn_def) {
+                    Ok(_) => (),
+                    Err(e) => {
+                        errors.push(e);
+                    }
+                }
+                Err(e) => {
+                    errors.push(e);
+                    consume_to_top_level(parser);
+                }
+            }
+            TokenKind::Struct => match parse_struct_def(parser, &next_token) {
+                Ok(struct_def) => match program.add_struct_def(struct_def) {
+                    Ok(_) => (),
+                    Err(e) => errors.push(e),
+                }
+                Err(e) => errors.push(e),
+            }
+            TokenKind::Enum => match parse_enum_def(parser, &next_token) {
+                Ok(enum_def) => match program.add_enum_def(enum_def) {
+                    Ok(_) => (),
+                    Err(e) => errors.push(e),
+                }
+                Err(e) => errors.push(e),
+            }
+            TokenKind::Type => match parse_alias_def(parser, &next_token) {
+                Ok(alias_def) => match program.add_alias_def(alias_def) {
+                    Ok(_) => (),
+                    Err(e) => errors.push(e),
+                }
+                Err(e) => errors.push(e),
+            }
+            TokenKind::Trait => match parse_trait_def(parser, &next_token) {
+                Ok(trait_def) => match program.add_trait_def(trait_def) {
+                    Ok(_) => (),
+                    Err(e) => errors.push(e),
+                }
+                Err(e) => errors.push(e),
+            }
+            TokenKind::Impl => match parse_impl_block(parser, &next_token) {
+                Ok(impl_block) => match program.add_impl_block(impl_block) {
+                    Ok(_) => (),
+                    Err(e) => errors.push(e),
+                }
+                Err(e) => errors.push(e),
+            }
+            _ => {
+                errors.push(ParserError::UnexpectedToken { at: next_token.loc, data: next_token.error_data() });
+                consume_to_top_level(parser);
+            }
+        };
+    }
+    if errors.is_empty() {
+        Ok(program)
+    } else {
+        Err(errors)
+    }
+}
+
+pub fn parse<'src>(source: &'src str) -> Result<Program, ()> {
+    let mut tokenizer = Tokenizer::new(source);
+    let tokens = tokenizer.tokenize();
+    let mut parser = Parser::new(tokens);
+    match parse_program(&mut parser) {
+        Ok(program) => Ok(program),
+        Err(errors) => {
+            for error in errors {
+                eprintln!("{}", error);
+            }
+            Err(())
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_fn_def() {
+        let source = "fn main() -> i32 { 0 }";
+        let program = parse(source);
+        assert!(program.is_ok());
+    }
+
+    #[test]
+    fn parse_struct_def() {
+        let source = "struct Point { x: i32, y: i32 }";
+        let program = parse(source);
+        assert!(program.is_ok());
+    }
 }

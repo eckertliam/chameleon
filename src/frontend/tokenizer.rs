@@ -56,6 +56,7 @@ pub enum TokenKind {
     Enum,
     Type,
     Trait,
+    Impl,
     For,
     // special tokens
     Eof,
@@ -115,6 +116,7 @@ impl TokenKind {
             Self::Enum => "enum",
             Self::Type => "type",
             Self::Trait => "trait",
+            Self::Impl => "impl",
             Self::For => "for",
             Self::Eof => "EOF",
             Self::UnexpectedChar => "Error: Unexpected character",
@@ -122,7 +124,7 @@ impl TokenKind {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Loc {
     pub line: usize,
     pub col: usize,
@@ -261,6 +263,7 @@ impl<'src> Tokenizer<'src> {
             "enum" => TokenKind::Enum,
             "type" => TokenKind::Type,
             "trait" => TokenKind::Trait,
+            "impl" => TokenKind::Impl,
             "for" => TokenKind::For,
             _ => TokenKind::Ident,
         }
