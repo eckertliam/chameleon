@@ -56,6 +56,7 @@ pub enum TokenKind {
     Enum,
     Type,
     Trait,
+    For,
     // special tokens
     Eof,
     // error
@@ -114,6 +115,7 @@ impl TokenKind {
             Self::Enum => "enum",
             Self::Type => "type",
             Self::Trait => "trait",
+            Self::For => "for",
             Self::Eof => "EOF",
             Self::UnexpectedChar => "Error: Unexpected character",
         }
@@ -259,6 +261,7 @@ impl<'src> Tokenizer<'src> {
             "enum" => TokenKind::Enum,
             "type" => TokenKind::Type,
             "trait" => TokenKind::Trait,
+            "for" => TokenKind::For,
             _ => TokenKind::Ident,
         }
     }

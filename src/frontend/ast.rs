@@ -450,3 +450,21 @@ pub struct TraitDef {
     pub required_fields: Vec<RequiredField>,
     pub loc: Loc,
 }
+
+/// An impl block
+/// 
+/// ```
+/// impl HasX for Point<T> {
+///     fn do_something_with_x(self) -> i32 {
+///         return self.x;
+///     }
+/// }
+/// ```
+pub struct ImplBlock {
+    // none if it's an impl for a struct
+    pub trait_: Option<Type>,
+    pub generics: GenericContext,
+    pub for_type: Type,
+    pub fns: Vec<FnDef>,
+    pub loc: Loc,
+}

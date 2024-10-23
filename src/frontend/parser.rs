@@ -935,3 +935,47 @@ fn parse_trait_def<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Resu
     }
     Ok(TraitDef { name, generics, required_fns, given_fns, required_fields, loc })
 }
+
+
+/// parse an impl block
+fn parse_impl_block<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<ImplBlock, ParserError> {
+    // token is the impl keyword
+    let loc = token.loc;
+    // check if there are generics
+    // TODO: move this match to the generic context parsing
+    let generics = match parser.peek().kind {
+        TokenKind::Lt => parse_generic_context(parser)?,
+        _ => GenericContext::new(),
+    };
+    let mut trait_ = None;
+    // expect a trait or a struct
+    let ty = parse_type_annotation(parser)?;
+    // if there is a for token then it's an impl for a trait and ty is the trait name
+    let for_type = if parser.peek().kind == TokenKind::For {
+        parser.consume();
+        trait_ = Some(ty);
+        // parse the type the impl belongs to
+        parse_type_annotation(parser)?
+    } else {
+        ty
+    };
+    // expect a lbrace
+    let lbrace = parser.consume();
+    if lbrace.kind != TokenKind::Lbrace {
+        return Err(ParserError::ExpectedToken { expected: TokenKind::Lbrace, at: lbrace.loc, data: lbrace.error_data() });
+    }
+    let mut fns: Vec<FnDef> = Vec::new();
+    let mut next_token = parser.consume();
+    loop {
+        match next_token.kind {
+            TokenKind::Fn => fns.push(parse_fn_def(parser, &next_token)?),
+            TokenKind::Rbrace => break,
+            _ => return Err(ParserError::UnexpectedToken { at: next_token.loc, data: next_token.error_data() }),
+        }
+        next_token = parser.consume();
+    }
+    if next_token.kind != TokenKind::Rbrace {
+        return Err(ParserError::ExpectedToken { expected: TokenKind::Rbrace, at: next_token.loc, data: next_token.error_data() });
+    }
+    Ok(ImplBlock { trait_, generics, for_type, fns, loc })
+}
