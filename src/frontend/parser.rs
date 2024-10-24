@@ -243,6 +243,8 @@ fn infix<'src>(parser: &mut Parser<'src>, lhs: Expr, token: &Token<'src>) -> Res
         TokenKind::Gte => infix_gte(parser, lhs, token),
         TokenKind::Lparen => infix_call(parser, lhs),
         TokenKind::Lbracket => infix_index(parser, lhs),
+        TokenKind::Dot => infix_field_access(parser, lhs),
+        TokenKind::ColonColon => infix_path_access(parser, lhs),
         _ => Err(ParserError::UnexpectedToken { at: token.loc, data: token.error_data() }),
     }
 }
@@ -321,6 +323,30 @@ fn infix_index<'src>(parser: &mut Parser<'src>, lhs: Expr) -> Result<Expr, Parse
     })
 }
 
+/// parse a field access
+fn infix_field_access<'src>(parser: &mut Parser<'src>, lhs: Expr) -> Result<Expr, ParserError> {
+    let field_token = parser.consume();
+    let rhs = expr(parser, &field_token, 0)?;
+    let loc = lhs.loc();
+    Ok(Expr::FieldAccess {
+        expr: Box::new(lhs),
+        field: Box::new(rhs),
+        loc,
+    })
+}
+
+/// parse a path access
+fn infix_path_access<'src>(parser: &mut Parser<'src>, lhs: Expr) -> Result<Expr, ParserError> {
+    let path_token = parser.consume();
+    let rhs = expr(parser, &path_token, 0)?;
+    let loc = lhs.loc();
+    Ok(Expr::PathAccess {
+        expr: Box::new(lhs),
+        path: vec![rhs],
+        loc,
+    })
+}
+
 /// returns the precedence of the operator
 fn get_prec(kind: TokenKind) -> u8 {
     match kind {
@@ -352,8 +378,26 @@ fn stmt<'src>(parser: &mut Parser<'src>) -> Result<Stmt, ParserError> {
         TokenKind::Const => var_decl(parser, &token, false),
         TokenKind::Lbrace => block_stmt(parser, &token),
         TokenKind::If => if_stmt(parser, &token),
+        TokenKind::Ident => {
+            if parser.peek().kind == TokenKind::Eq {
+                // consume the =
+                parser.consume();
+                assign_stmt(parser, &token)
+            } else {
+                Ok(Stmt::Expr(expr(parser, &token, 0)?))
+            }
+        }
         _ => Ok(Stmt::Expr(expr(parser, &token, 0)?)),
     }
+}
+
+/// parse an assignment statement
+fn assign_stmt<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<Stmt, ParserError> {
+    let var = unwrap_lexeme_with_kind(token, TokenKind::Ident)?;
+    let value_token = parser.consume();
+    let value = expr(parser, &value_token, 0)?;
+    expect_token(parser, TokenKind::Semicolon)?;
+    Ok(Stmt::Assign { var, value, loc: token.loc })
 }
 
 /// parse a return statement

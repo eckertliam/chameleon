@@ -39,6 +39,7 @@ pub enum TokenKind {
     Rbracket,
     Comma,
     Colon,
+    ColonColon,
     Semicolon,
     Arrow,
     FatArrow,
@@ -100,6 +101,7 @@ impl TokenKind {
             Self::Rbracket => "]",
             Self::Comma => ",",
             Self::Colon => ":",
+            Self::ColonColon => "::",
             Self::Semicolon => ";",
             Self::Arrow => "->",
             Self::FatArrow => "=>",
@@ -368,7 +370,14 @@ impl<'src> Tokenizer<'src> {
                 ']' => self.next_simple(TokenKind::Rbracket),
                 ',' => self.next_simple(TokenKind::Comma),
                 '.' => self.next_simple(TokenKind::Dot),
-                ':' => self.next_simple(TokenKind::Colon),
+                ':' => {
+                    self.next_char();
+                    if let Some(':') = self.peek_char() {
+                        self.next_simple(TokenKind::ColonColon);
+                    } else {
+                        self.simple_token(TokenKind::Colon);
+                    }
+                }
                 ';' => self.next_simple(TokenKind::Semicolon),
                 'a'..='z' | 'A'..='Z' | '_' => self.read_symbol(),
                 // TODO: handle string and char literals

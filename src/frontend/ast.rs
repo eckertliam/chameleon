@@ -1,4 +1,4 @@
-use std::{collections::HashMap, string::ParseError};
+use std::collections::HashMap;
 use crate::frontend::Loc;
 
 use super::parser::ParserError;
@@ -132,6 +132,16 @@ pub enum Expr {
         index: Box<Expr>,
         loc: Loc,
     },
+    FieldAccess {
+        expr: Box<Expr>,
+        field: Box<Expr>,
+        loc: Loc,
+    },
+    PathAccess {
+        expr: Box<Expr>,
+        path: Vec<Expr>,
+        loc: Loc,
+    },
 }
 
 impl Expr {
@@ -148,6 +158,8 @@ impl Expr {
             Expr::Array { loc, .. } => *loc,
             Expr::Block { loc, .. } => *loc,
             Expr::Index { loc, .. } => *loc,
+            Expr::FieldAccess { loc, .. } => *loc,
+            Expr::PathAccess { loc, .. } => *loc,
         }
     }
 }
@@ -199,6 +211,11 @@ pub enum Stmt {
         value: Expr,
         loc: Loc,
     },
+    Assign {
+        var: String,
+        value: Expr,
+        loc: Loc,
+    },
     Block {
         stmts: Vec<Stmt>,
         loc: Loc,
@@ -228,6 +245,7 @@ pub enum Type {
     F64(Loc),
     Bool(Loc),
     Void(Loc),
+    String(Loc),
     Tuple(Vec<Type>, Loc),
     Array(Box<Type>, Expr, Loc),
     // User-defined types
@@ -263,6 +281,7 @@ impl ToString for Type {
             Type::F64(_) => "f64".to_string(),
             Type::Bool(_) => "bool".to_string(),
             Type::Void(_) => "void".to_string(),
+            Type::String(_) => "string".to_string(),
             Type::Tuple(tys, _) => format!("({})", tys.iter().map(|ty| ty.to_string()).collect::<Vec<String>>().join(", ")),
             Type::Array(ty, size, _) => format!("Array<{}, {:?}>", ty.to_string(), size),
             Type::Alias(name, _) => name.clone(),
