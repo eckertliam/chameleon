@@ -1,10 +1,17 @@
 // the entirety of Chameleon's type system lives here
 
-
-// define concrete types
-
 use std::collections::HashMap;
 
+pub enum EnumVariant {
+    Unit(String),
+    Tuple(Vec<MonoType>),
+    Record {
+        name: String,
+        fields: HashMap<String, MonoType>,
+    },
+}
+
+// define concrete types
 pub enum ConcreteType {
     // for numeric types u8 is the number of bytes
     Int(u8),
@@ -14,6 +21,19 @@ pub enum ConcreteType {
     String,
     // a type with no values ie ()
     Unit,
+    Function {
+        name: Option<String>,
+        params: Vec<MonoType>,
+        ret: Box<MonoType>,
+    },
+    Struct {
+        name: String,
+        fields: HashMap<String, MonoType>,
+    },
+    Enum {
+        name: String,
+        variants: Vec<EnumVariant>,
+    },
 }
 
 impl ToString for ConcreteType {
@@ -25,36 +45,46 @@ impl ToString for ConcreteType {
             ConcreteType::Bool => "bool".to_string(),
             ConcreteType::String => "string".to_string(),
             ConcreteType::Unit => "unit".to_string(),
+            ConcreteType::Struct { name, fields } => format!("{}", name),
+            ConcreteType::Enum { name, variants } => format!("{}", name),
+            ConcreteType::Function { name, params, ret } => format!("Fn({}) -> {}", params.iter().map(|t| t.to_string()).collect::<Vec<String>>().join(", "), ret.to_string()),
         }
     }
 }
 
+/// Applied types
 pub enum AppliedType {
-    Function(Box<MonoType>, Box<MonoType>),
-    List(Box<MonoType>),
-    Option(Box<MonoType>),
-    Result(Box<MonoType>, Box<MonoType>),
-    Tuple(Vec<MonoType>),
-    Union(Vec<MonoType>),
-    Intersection(Vec<MonoType>),
+    Function {
+        name: Option<String>,
+        type_args: Vec<MonoType>,
+        params: Vec<MonoType>,
+        ret: Box<MonoType>,
+    },
+    Record {
+        name: String,
+        type_args: Vec<MonoType>,
+        fields: HashMap<String, MonoType>,
+    },
+    Enum {
+        name: String,
+        type_args: Vec<MonoType>,
+        variants: Vec<EnumVariant>,
+    },
 }
 
 impl ToString for AppliedType {
     fn to_string(&self) -> String {
         match self {
-            AppliedType::Function(param, ret) => format!("Fn<{}, {}>", param.to_string(), ret.to_string()),
-            AppliedType::List(t) => format!("List<{}>", t.to_string()),
-            AppliedType::Option(t) => format!("Option<{}>", t.to_string()),
-            AppliedType::Result(ok, err) => format!("Result<{}, {}>", ok.to_string(), err.to_string()),
-            AppliedType::Tuple(ts) => format!("({})", ts.iter().map(|t| t.to_string()).collect::<Vec<String>>().join(", ")),
-            AppliedType::Union(ts) => format!("{}", ts.iter().map(|t| t.to_string()).collect::<Vec<String>>().join(" | ")),
-            AppliedType::Intersection(ts) => format!("{}", ts.iter().map(|t| t.to_string()).collect::<Vec<String>>().join(" & ")),
+            AppliedType::Function { name, type_args, params, ret } => format!("Fn<{}>({}) -> {}", type_args.iter().map(|t| t.to_string()).collect::<Vec<String>>().join(", "), params.iter().map(|t| t.to_string()).collect::<Vec<String>>().join(", "), ret.to_string()),
+            AppliedType::Record { name, type_args, fields } => format!("{}<{}>", name, type_args.iter().map(|t| t.to_string()).collect::<Vec<String>>().join(", ")),
+            AppliedType::Enum { name, type_args, variants } => format!("{}<{}>", name, type_args.iter().map(|t| t.to_string()).collect::<Vec<String>>().join(", ")),
         }
     }
 }
 
+/// Monomorphic types
 pub enum MonoType {
-    TypeVar(String),
+    TypeVar(TypeVar),
     Concrete(ConcreteType),
     Applied(AppliedType),
 }
@@ -62,10 +92,28 @@ pub enum MonoType {
 impl ToString for MonoType {
     fn to_string(&self) -> String {
         match self {
-            MonoType::TypeVar(v) => v.clone(),
             MonoType::Concrete(c) => c.to_string(),
             MonoType::Applied(a) => a.to_string(),
+            MonoType::TypeVar(v) => v.to_string(),
         }
     }
 }
 
+/// A type variable
+pub struct TypeVar {
+    pub name: String,
+}
+
+impl ToString for TypeVar {
+    fn to_string(&self) -> String {
+        self.name.clone()
+    }
+}
+
+impl From<String> for TypeVar {
+    fn from(name: String) -> Self {
+        TypeVar { name }
+    }
+}
+
+// TODO: add polymorphic types
