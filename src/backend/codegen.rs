@@ -1,7 +1,7 @@
 use inkwell::{
     builder::Builder, module::Linkage, types::{AnyType, AnyTypeEnum, BasicMetadataTypeEnum, BasicType, BasicTypeEnum, FloatType, IntType}, values::{AnyValue, AnyValueEnum, BasicValue, BasicValueEnum, FloatValue, IntValue}
 };
-use crate::frontend::{Expr, Stmt, Type, BinOpKind, FnDef, Program};
+use crate::frontend::{Expr, Stmt, TypeExpr, BinOpKind, FnDef, Program};
 
 use super::{codegen_ctx::{CodegenContext, SymbolValue}, codegen_err::CodegenError};
 
@@ -212,23 +212,23 @@ where 'ctx: 'ir
     }
 }
 
-impl<'ctx, 'ir> Type
+impl<'ctx, 'ir> TypeExpr
 where 'ctx: 'ir
 {
     fn codegen(&self, codegen_context: &CodegenContext<'ctx>) -> IRTypeResult<'ir> {
         match self {
-            Type::I8(_) => Ok(codegen_context.context.i8_type().as_any_type_enum()),
-            Type::I16(_) => Ok(codegen_context.context.i16_type().as_any_type_enum()),
-            Type::I32(_) => Ok(codegen_context.context.i32_type().as_any_type_enum()),
-            Type::I64(_) => Ok(codegen_context.context.i64_type().as_any_type_enum()),
-            Type::F32(_) => Ok(codegen_context.context.f32_type().as_any_type_enum()),
-            Type::F64(_) => Ok(codegen_context.context.f64_type().as_any_type_enum()),
-            Type::U8(_) => Ok(codegen_context.context.i8_type().as_any_type_enum()),
-            Type::U16(_) => Ok(codegen_context.context.i16_type().as_any_type_enum()),
-            Type::U32(_) => Ok(codegen_context.context.i32_type().as_any_type_enum()),
-            Type::U64(_) => Ok(codegen_context.context.i64_type().as_any_type_enum()),
-            Type::Bool(_) => Ok(codegen_context.context.bool_type().as_any_type_enum()),
-            Type::Void(_) => Ok(codegen_context.context.void_type().as_any_type_enum()),
+            TypeExpr::I8(_) => Ok(codegen_context.context.i8_type().as_any_type_enum()),
+            TypeExpr::I16(_) => Ok(codegen_context.context.i16_type().as_any_type_enum()),
+            TypeExpr::I32(_) => Ok(codegen_context.context.i32_type().as_any_type_enum()),
+            TypeExpr::I64(_) => Ok(codegen_context.context.i64_type().as_any_type_enum()),
+            TypeExpr::F32(_) => Ok(codegen_context.context.f32_type().as_any_type_enum()),
+            TypeExpr::F64(_) => Ok(codegen_context.context.f64_type().as_any_type_enum()),
+            TypeExpr::U8(_) => Ok(codegen_context.context.i8_type().as_any_type_enum()),
+            TypeExpr::U16(_) => Ok(codegen_context.context.i16_type().as_any_type_enum()),
+            TypeExpr::U32(_) => Ok(codegen_context.context.i32_type().as_any_type_enum()),
+            TypeExpr::U64(_) => Ok(codegen_context.context.i64_type().as_any_type_enum()),
+            TypeExpr::Bool(_) => Ok(codegen_context.context.bool_type().as_any_type_enum()),
+            TypeExpr::Void(_) => Ok(codegen_context.context.void_type().as_any_type_enum()),
             // TODO: add support for pointer types
             // TODO: add support for tuple types
             // TODO: add support for array types

@@ -378,26 +378,33 @@ fn stmt<'src>(parser: &mut Parser<'src>) -> Result<Stmt, ParserError> {
         TokenKind::Const => var_decl(parser, &token, false),
         TokenKind::Lbrace => block_stmt(parser, &token),
         TokenKind::If => if_stmt(parser, &token),
-        TokenKind::Ident => {
-            if parser.peek().kind == TokenKind::Eq {
-                // consume the =
-                parser.consume();
-                assign_stmt(parser, &token)
-            } else {
-                Ok(Stmt::Expr(expr(parser, &token, 0)?))
-            }
+        TokenKind::Ident => assign_stmt(parser, &token),
+        _ => {
+            let expr = expr(parser, &token, 0)?;
+            expect_token(parser, TokenKind::Semicolon)?;
+            Ok(Stmt::Expr(expr))
         }
-        _ => Ok(Stmt::Expr(expr(parser, &token, 0)?)),
     }
 }
 
 /// parse an assignment statement
 fn assign_stmt<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<Stmt, ParserError> {
-    let var = unwrap_lexeme_with_kind(token, TokenKind::Ident)?;
-    let value_token = parser.consume();
-    let value = expr(parser, &value_token, 0)?;
-    expect_token(parser, TokenKind::Semicolon)?;
-    Ok(Stmt::Assign { var, value, loc: token.loc })
+    let var = expr(parser, &token, 0)?;
+    let loc = token.loc;
+    match parser.consume().kind {
+        TokenKind::Eq => {
+            let value_token = parser.consume();
+            let value = expr(parser, &value_token, 0)?;
+            expect_token(parser, TokenKind::Semicolon)?;
+            Ok(Stmt::Assign { 
+                var,
+                value,
+                loc,
+            })
+        }
+        TokenKind::Semicolon => Ok(Stmt::Expr(var)),
+        _ => Err(ParserError::UnexpectedToken { at: token.loc, data: token.error_data() }),
+    }
 }
 
 /// parse a return statement
@@ -510,7 +517,7 @@ fn if_stmt<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<Stmt,
 /// 
 /// expects to start with TokenKind Ident, Lbracket, or Lparen
 /// will return an error if it doesn't
-fn parse_type_annotation<'src>(parser: &mut Parser<'src>) -> Result<Type, ParserError> {
+fn parse_type_annotation<'src>(parser: &mut Parser<'src>) -> Result<TypeExpr, ParserError> {
     let token = parser.consume();
     // will either start with TokenKind Ident, Lbracket, or Lparen
     match token.kind {
@@ -521,24 +528,24 @@ fn parse_type_annotation<'src>(parser: &mut Parser<'src>) -> Result<Type, Parser
                 // consume the <
                 let token = parser.consume();
                 let generic_args = parse_generic_args(parser)?;
-                return Ok(Type::Generic(name, generic_args, token.loc))
+                return Ok(TypeExpr::Generic(name, generic_args, token.loc))
             } 
             // match on the primitive type
             // otherwise it's an alias
             let ty =match name.as_str() {
-                "i8" => Type::I8(token.loc),
-                "i16" => Type::I16(token.loc),
-                "i32" => Type::I32(token.loc),
-                "i64" => Type::I64(token.loc),
-                "u8" => Type::U8(token.loc),
-                "u16" => Type::U16(token.loc),
-                "u32" => Type::U32(token.loc),
-                "u64" => Type::U64(token.loc),
-                "f32" => Type::F32(token.loc),
-                "f64" => Type::F64(token.loc),
-                "bool" => Type::Bool(token.loc),
-                "void" => Type::Void(token.loc),
-                _ => Type::Alias(name, token.loc),
+                "i8" => TypeExpr::I8(token.loc),
+                "i16" => TypeExpr::I16(token.loc),
+                "i32" => TypeExpr::I32(token.loc),
+                "i64" => TypeExpr::I64(token.loc),
+                "u8" => TypeExpr::U8(token.loc),
+                "u16" => TypeExpr::U16(token.loc),
+                "u32" => TypeExpr::U32(token.loc),
+                "u64" => TypeExpr::U64(token.loc),
+                "f32" => TypeExpr::F32(token.loc),
+                "f64" => TypeExpr::F64(token.loc),
+                "bool" => TypeExpr::Bool(token.loc),
+                "void" => TypeExpr::Void(token.loc),
+                _ => TypeExpr::Alias(name, token.loc),
             };
             Ok(ty)
         }
@@ -551,7 +558,7 @@ fn parse_type_annotation<'src>(parser: &mut Parser<'src>) -> Result<Type, Parser
 /// parse an array type
 /// 
 /// errors if it doesn't close with a ]
-fn parse_array_type<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<Type, ParserError> {
+fn parse_array_type<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<TypeExpr, ParserError> {
     let loc = token.loc;
     let elem_type = parse_type_annotation(parser)?;
     // expect a semicolon
@@ -560,27 +567,27 @@ fn parse_array_type<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Res
     let size_token = parser.consume();
     let size = expr(parser, &size_token, 0)?;
 
-    Ok(Type::Array(Box::new(elem_type), size, loc))
+    Ok(TypeExpr::Array(Box::new(elem_type), size, loc))
 }
 
 
 /// parse a tuple type
 /// 
 /// errors if it doesn't close with a )
-fn parse_tuple_type<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<Type, ParserError> {
+fn parse_tuple_type<'src>(parser: &mut Parser<'src>, token: &Token<'src>) -> Result<TypeExpr, ParserError> {
     let loc = token.loc;
     let mut types = Vec::new();
     while parser.peek().kind != TokenKind::Rparen {
         types.push(parse_type_annotation(parser)?);
     }
     expect_token(parser, TokenKind::Rparen)?;
-    Ok(Type::Tuple(types, loc))
+    Ok(TypeExpr::Tuple(types, loc))
 }
 
 /// parse a generic argument list
 /// 
 /// errors if it doesn't close with a >
-fn parse_generic_args<'src>(parser: &mut Parser<'src>) -> Result<Vec<Type>, ParserError> {
+fn parse_generic_args<'src>(parser: &mut Parser<'src>) -> Result<Vec<TypeExpr>, ParserError> {
     let mut args = Vec::new();
     while parser.peek().kind != TokenKind::Gt {
         args.push(parse_type_annotation(parser)?);
@@ -654,7 +661,7 @@ fn parse_generic_context<'src>(parser: &mut Parser<'src>) -> Result<GenericConte
 }
 
 /// parse a function parameter list
-fn parse_fn_params<'src>(parser: &mut Parser<'src>) -> Result<Vec<(String, Type)>, ParserError> {
+fn parse_fn_params<'src>(parser: &mut Parser<'src>) -> Result<Vec<(String, TypeExpr)>, ParserError> {
     // expect a (
     expect_token(parser, TokenKind::Lparen)?;
     // handle the case where there are no parameters

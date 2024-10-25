@@ -201,18 +201,18 @@ pub enum Stmt {
     Expr(Expr),
     LetDef {
         name: String,
-        ty: Option<Type>,
+        ty: Option<TypeExpr>,
         value: Expr,
         loc: Loc,
     },
     ConstDef {
         name: String,
-        ty: Option<Type>,
+        ty: Option<TypeExpr>,
         value: Expr,
         loc: Loc,
     },
     Assign {
-        var: String,
+        var: Expr,
         value: Expr,
         loc: Loc,
     },
@@ -231,7 +231,7 @@ pub enum Stmt {
 
 /// All type annotations
 #[derive(Debug, Clone, PartialEq)]
-pub enum Type {
+pub enum TypeExpr {
     // Primitive types
     I8(Loc),
     I16(Loc),
@@ -246,8 +246,8 @@ pub enum Type {
     Bool(Loc),
     Void(Loc),
     String(Loc),
-    Tuple(Vec<Type>, Loc),
-    Array(Box<Type>, Expr, Loc),
+    Tuple(Vec<TypeExpr>, Loc),
+    Array(Box<TypeExpr>, Expr, Loc),
     // User-defined types
     /// An alias type
     /// 
@@ -263,29 +263,29 @@ pub enum Type {
     /// ```
     /// let x: Vec<i64> = Vec::new();
     /// ```
-    Generic(String, Vec<Type>, Loc),
+    Generic(String, Vec<TypeExpr>, Loc),
 }
 
-impl ToString for Type {
+impl ToString for TypeExpr {
     fn to_string(&self) -> String {
         match self {
-            Type::I8(_) => "i8".to_string(),
-            Type::I16(_) => "i16".to_string(),
-            Type::I32(_) => "i32".to_string(),
-            Type::I64(_) => "i64".to_string(),
-            Type::U8(_) => "u8".to_string(),
-            Type::U16(_) => "u16".to_string(),
-            Type::U32(_) => "u32".to_string(),
-            Type::U64(_) => "u64".to_string(),
-            Type::F32(_) => "f32".to_string(),
-            Type::F64(_) => "f64".to_string(),
-            Type::Bool(_) => "bool".to_string(),
-            Type::Void(_) => "void".to_string(),
-            Type::String(_) => "string".to_string(),
-            Type::Tuple(tys, _) => format!("({})", tys.iter().map(|ty| ty.to_string()).collect::<Vec<String>>().join(", ")),
-            Type::Array(ty, size, _) => format!("Array<{}, {:?}>", ty.to_string(), size),
-            Type::Alias(name, _) => name.clone(),
-            Type::Generic(name, tys, _) => format!("{}<{}>", name, tys.iter().map(|ty| ty.to_string()).collect::<Vec<String>>().join(", ")),
+            TypeExpr::I8(_) => "i8".to_string(),
+            TypeExpr::I16(_) => "i16".to_string(),
+            TypeExpr::I32(_) => "i32".to_string(),
+            TypeExpr::I64(_) => "i64".to_string(),
+            TypeExpr::U8(_) => "u8".to_string(),
+            TypeExpr::U16(_) => "u16".to_string(),
+            TypeExpr::U32(_) => "u32".to_string(),
+            TypeExpr::U64(_) => "u64".to_string(),
+            TypeExpr::F32(_) => "f32".to_string(),
+            TypeExpr::F64(_) => "f64".to_string(),
+            TypeExpr::Bool(_) => "bool".to_string(),
+            TypeExpr::Void(_) => "void".to_string(),
+            TypeExpr::String(_) => "string".to_string(),
+            TypeExpr::Tuple(tys, _) => format!("({})", tys.iter().map(|ty| ty.to_string()).collect::<Vec<String>>().join(", ")),
+            TypeExpr::Array(ty, size, _) => format!("Array<{}, {:?}>", ty.to_string(), size),
+            TypeExpr::Alias(name, _) => name.clone(),
+            TypeExpr::Generic(name, tys, _) => format!("{}<{}>", name, tys.iter().map(|ty| ty.to_string()).collect::<Vec<String>>().join(", ")),
         }
     }
 }
@@ -355,14 +355,14 @@ impl GenericContext {
 pub struct FnDef {
     pub name: String,
     pub generics: GenericContext,
-    pub params: Vec<(String, Type)>,
-    pub ret_ty: Type,
+    pub params: Vec<(String, TypeExpr)>,
+    pub ret_ty: TypeExpr,
     pub body: Vec<Stmt>,
     pub loc: Loc,
 }
 
 impl FnDef {
-    pub fn new(name: String, generics: GenericContext, params: Vec<(String, Type)>, ret_ty: Type, body: Vec<Stmt>, loc: Loc) -> Self {
+    pub fn new(name: String, generics: GenericContext, params: Vec<(String, TypeExpr)>, ret_ty: TypeExpr, body: Vec<Stmt>, loc: Loc) -> Self {
         Self {
             name,
             generics,
@@ -379,7 +379,7 @@ pub struct StructField {
     // defaults to false
     pub is_private: bool,
     pub name: String,
-    pub ty: Type,
+    pub ty: TypeExpr,
     pub loc: Loc,
 }
 
@@ -436,7 +436,7 @@ pub enum EnumVariant {
     /// ```
     Tuple {
         name: String,
-        fields: Vec<Type>,
+        fields: Vec<TypeExpr>,
         loc: Loc,
     },
     /// A struct variant
@@ -503,7 +503,7 @@ pub struct EnumDef {
 pub struct AliasDef {
     pub name: String,
     pub generics: GenericContext,
-    pub ty: Type,
+    pub ty: TypeExpr,
     pub loc: Loc,
 }
 
@@ -517,8 +517,8 @@ pub struct AliasDef {
 pub struct RequiredFn {
     pub name: String,
     pub generics: GenericContext,
-    pub params: Vec<(String, Type)>,
-    pub ret_ty: Type,
+    pub params: Vec<(String, TypeExpr)>,
+    pub ret_ty: TypeExpr,
     pub loc: Loc,
 }
 
@@ -538,7 +538,7 @@ pub enum TraitFn {
 /// ```
 pub struct RequiredField {
     pub name: String,
-    pub ty: Type,
+    pub ty: TypeExpr,
     pub loc: Loc,
 }
 
@@ -577,9 +577,9 @@ pub struct TraitDef {
 /// ```
 pub struct ImplBlock {
     // none if it's an impl for a struct
-    pub trait_: Option<Type>,
+    pub trait_: Option<TypeExpr>,
     pub generics: GenericContext,
-    pub for_type: Type,
+    pub for_type: TypeExpr,
     pub fns: Vec<FnDef>,
     pub loc: Loc,
 }
