@@ -2,118 +2,100 @@
 
 use std::collections::HashMap;
 
-pub enum EnumVariant {
-    Unit(String),
-    Tuple(Vec<MonoType>),
-    Record {
-        name: String,
-        fields: HashMap<String, MonoType>,
-    },
+pub struct TypeEnv {
+    types: HashMap<String, Box<dyn Type>>,
 }
 
-// define concrete types
-pub enum ConcreteType {
-    // for numeric types u8 is the number of bytes
-    Int(u8),
-    Float(u8),
-    UInt(u8),
-    Bool,
-    String,
-    // a type with no values ie ()
-    Unit,
-    Function {
-        name: Option<String>,
-        params: Vec<MonoType>,
-        ret: Box<MonoType>,
-    },
-    Struct {
-        name: String,
-        fields: HashMap<String, MonoType>,
-    },
-    Enum {
-        name: String,
-        variants: Vec<EnumVariant>,
-    },
+trait Type {
+    /// returns the size of the type in bytes
+    fn size(&self) -> u8;
 }
 
-impl ToString for ConcreteType {
-    fn to_string(&self) -> String {
-        match self {
-            ConcreteType::Int(width) => format!("i{}", width * 8),
-            ConcreteType::Float(width) => format!("f{}", width * 8),
-            ConcreteType::UInt(width) => format!("u{}", width * 8),
-            ConcreteType::Bool => "bool".to_string(),
-            ConcreteType::String => "string".to_string(),
-            ConcreteType::Unit => "unit".to_string(),
-            ConcreteType::Struct { name, fields } => format!("{}", name),
-            ConcreteType::Enum { name, variants } => format!("{}", name),
-            ConcreteType::Function { name, params, ret } => format!("Fn({}) -> {}", params.iter().map(|t| t.to_string()).collect::<Vec<String>>().join(", "), ret.to_string()),
+struct IntType {
+    size: u8,
+    signed: bool,
+}
+
+impl IntType {
+    pub fn i8() -> IntType {
+        IntType {
+            size: 1,
+            signed: true,
+        }
+    }
+
+    pub fn i16() -> IntType {
+        IntType {
+            size: 2,
+            signed: true,
+        }
+    }
+
+    pub fn i32() -> IntType {
+        IntType {
+            size: 4,
+            signed: true,
+        }
+    }
+
+    pub fn i64() -> IntType {
+        IntType {
+            size: 8,
+            signed: true,
+        }
+    }
+
+    pub fn u8() -> IntType {
+        IntType {
+            size: 1,
+            signed: false,
+        }
+    }
+
+    pub fn u16() -> IntType {
+        IntType {
+            size: 2,
+            signed: false,
+        }
+    }
+
+    pub fn u32() -> IntType {
+        IntType {
+            size: 4,
+            signed: false,
+        }
+    }
+
+    pub fn u64() -> IntType {
+        IntType {
+            size: 8,
+            signed: false,
         }
     }
 }
 
-/// Applied types
-pub enum AppliedType {
-    Function {
-        name: Option<String>,
-        type_args: Vec<MonoType>,
-        params: Vec<MonoType>,
-        ret: Box<MonoType>,
-    },
-    Record {
-        name: String,
-        type_args: Vec<MonoType>,
-        fields: HashMap<String, MonoType>,
-    },
-    Enum {
-        name: String,
-        type_args: Vec<MonoType>,
-        variants: Vec<EnumVariant>,
-    },
-}
-
-impl ToString for AppliedType {
-    fn to_string(&self) -> String {
-        match self {
-            AppliedType::Function { name, type_args, params, ret } => format!("Fn<{}>({}) -> {}", type_args.iter().map(|t| t.to_string()).collect::<Vec<String>>().join(", "), params.iter().map(|t| t.to_string()).collect::<Vec<String>>().join(", "), ret.to_string()),
-            AppliedType::Record { name, type_args, fields } => format!("{}<{}>", name, type_args.iter().map(|t| t.to_string()).collect::<Vec<String>>().join(", ")),
-            AppliedType::Enum { name, type_args, variants } => format!("{}<{}>", name, type_args.iter().map(|t| t.to_string()).collect::<Vec<String>>().join(", ")),
-        }
+impl Type for IntType {
+    fn size(&self) -> u8 {
+        self.size
     }
 }
 
-/// Monomorphic types
-pub enum MonoType {
-    TypeVar(TypeVar),
-    Concrete(ConcreteType),
-    Applied(AppliedType),
+struct FloatType {
+    bytes: u8,
 }
 
-impl ToString for MonoType {
-    fn to_string(&self) -> String {
-        match self {
-            MonoType::Concrete(c) => c.to_string(),
-            MonoType::Applied(a) => a.to_string(),
-            MonoType::TypeVar(v) => v.to_string(),
-        }
+impl FloatType {
+    pub fn f32() -> FloatType {
+        FloatType { bytes: 4 }
+    }
+
+    pub fn f64() -> FloatType {
+        FloatType { bytes: 8 }
     }
 }
 
-/// A type variable
-pub struct TypeVar {
-    pub name: String,
-}
-
-impl ToString for TypeVar {
-    fn to_string(&self) -> String {
-        self.name.clone()
+impl Type for FloatType {
+    fn size(&self) -> u8 {
+        self.bytes
     }
 }
-
-impl From<String> for TypeVar {
-    fn from(name: String) -> Self {
-        TypeVar { name }
-    }
-}
-
-// TODO: add polymorphic types
